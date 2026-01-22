@@ -1,0 +1,6 @@
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+httpx>=0.25.0
+redis[hiredis]>=5.0.0
+pydantic-settings>=2.1.0
+sdnotify>=0.3.2

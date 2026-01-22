@@ -1,0 +1,29 @@
+[Unit]
+Description=Mist User-ID Worker (PA API Sender)
+After=network.target redis.service
+Requires=redis.service
+
+[Service]
+Type=exec
+ExecStart=/opt/mist-userid/venv/bin/python -m app.worker
+WorkingDirectory=/opt/mist-userid
+Restart=always
+RestartSec=5
+WatchdogSec=30
+
+# Memory protection
+MemoryMax=256M
+MemoryHigh=200M
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/mist-userid
+
+# Environment
+EnvironmentFile=/etc/mist-userid/env
+
+[Install]
+WantedBy=multi-user.target

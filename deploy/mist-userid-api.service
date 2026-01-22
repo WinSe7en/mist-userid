@@ -1,0 +1,29 @@
+[Unit]
+Description=Mist User-ID API Receiver
+After=network.target redis.service
+Requires=redis.service
+
+[Service]
+Type=exec
+ExecStart=/opt/mist-userid/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+WorkingDirectory=/opt/mist-userid
+Restart=always
+RestartSec=5
+WatchdogSec=30
+
+# Memory protection
+MemoryMax=512M
+MemoryHigh=400M
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/log/mist-userid
+
+# Environment
+EnvironmentFile=/etc/mist-userid/env
+
+[Install]
+WantedBy=multi-user.target
