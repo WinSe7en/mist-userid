@@ -1,14 +1,19 @@
 import asyncio
+import json
 import logging
+import time
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import httpx
 
 from app.config import get_settings
+from app.metrics import DLQ_EVENTS, PA_REQUEST_DURATION, PA_REQUESTS
+from app.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
 TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+DLQ_KEY = "userid_dlq"
 
 
 def build_uid_xml(
@@ -51,17 +56,22 @@ async def send_to_target(
 
     for attempt in range(max_retries + 1):
         try:
+            start = time.monotonic()
             resp = await client.post(url, data=data)
+            duration = time.monotonic() - start
+            PA_REQUEST_DURATION.labels(target=target).observe(duration)
 
             if resp.status_code == 200 and "success" in resp.text:
                 logger.debug("Success from %s (attempt %d): %s",
                              target, attempt + 1, resp.text[:100])
+                PA_REQUESTS.labels(target=target, status="success").inc()
                 return True
 
             if resp.status_code in {401, 403}:
                 logger.error(
                     "Permanent auth failure from %s: %d", target, resp.status_code
                 )
+                PA_REQUESTS.labels(target=target, status="failure").inc()
                 return False
 
             if resp.status_code in TRANSIENT_STATUS_CODES:
@@ -71,17 +81,20 @@ async def send_to_target(
                         "Transient error %d from %s, retry %d/%d in %ds",
                         resp.status_code, target, attempt + 1, max_retries, delay,
                     )
+                    PA_REQUESTS.labels(target=target, status="retry").inc()
                     await asyncio.sleep(delay)
                     continue
                 logger.error(
                     "Max retries reached for %s (last status: %d)",
                     target, resp.status_code,
                 )
+                PA_REQUESTS.labels(target=target, status="failure").inc()
                 return False
 
             # Unexpected status
             logger.error("Unexpected response from %s: %d %s",
                          target, resp.status_code, resp.text[:200])
+            PA_REQUESTS.labels(target=target, status="failure").inc()
             return False
 
         except (httpx.TimeoutException, httpx.ConnectError) as e:
@@ -91,9 +104,11 @@ async def send_to_target(
                     "Connection error to %s: %s, retry %d/%d in %ds",
                     target, type(e).__name__, attempt + 1, max_retries, delay,
                 )
+                PA_REQUESTS.labels(target=target, status="retry").inc()
                 await asyncio.sleep(delay)
                 continue
             logger.error("Max retries reached for %s: %s", target, e)
+            PA_REQUESTS.labels(target=target, status="failure").inc()
             return False
 
     return False
@@ -103,9 +118,10 @@ async def send_batch(
     client: httpx.AsyncClient,
     logins: list[tuple[str, str]],
     logouts: list[tuple[str, str]],
-) -> None:
+) -> list[str]:
+    """Send batch to all PA targets. Returns list of failed target URLs."""
     if not logins and not logouts:
-        return
+        return []
 
     settings = get_settings()
     xml_body = build_uid_xml(logins, logouts, settings.userid_timeout)
@@ -127,8 +143,44 @@ async def send_batch(
         return_exceptions=True,
     )
 
+    failed_targets = []
     for target, result in zip(settings.pa_target_list, results):
         if isinstance(result, Exception):
             logger.error("Unexpected exception sending to %s: %s", target, result)
+            PA_REQUESTS.labels(target=target, status="failure").inc()
+            failed_targets.append(target)
         elif not result:
-            logger.error("Failed to send batch to %s", target)
+            failed_targets.append(target)
+
+    if failed_targets:
+        await _dead_letter(failed_targets, logins, logouts)
+
+    return failed_targets
+
+
+async def _dead_letter(
+    failed_targets: list[str],
+    logins: list[tuple[str, str]],
+    logouts: list[tuple[str, str]],
+) -> None:
+    """Push failed batch entries to the dead-letter queue."""
+    import time as _time
+
+    entry = json.dumps({
+        "timestamp": _time.time(),
+        "targets": failed_targets,
+        "logins": logins,
+        "logouts": logouts,
+        "error": f"All retries exhausted for targets: {', '.join(failed_targets)}",
+    })
+
+    try:
+        r = await get_redis()
+        await r.lpush(DLQ_KEY, entry)
+        DLQ_EVENTS.inc()
+        logger.warning(
+            "Dead-lettered batch (%d logins, %d logouts) for targets: %s",
+            len(logins), len(logouts), ", ".join(failed_targets),
+        )
+    except Exception as e:
+        logger.error("Failed to write to DLQ: %s", e)

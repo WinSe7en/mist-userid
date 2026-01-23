@@ -4,3 +4,5 @@ httpx>=0.25.0
 redis[hiredis]>=5.0.0
 pydantic-settings>=2.1.0
 sdnotify>=0.3.2
+prometheus-client>=0.20.0
+python-json-logger>=2.0.0

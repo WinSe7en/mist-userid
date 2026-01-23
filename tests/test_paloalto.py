@@ -5,7 +5,7 @@ from xml.etree.ElementTree import fromstring
 import httpx
 import pytest
 
-from app.paloalto import build_uid_xml, send_batch, send_to_target
+from app.paloalto import DLQ_KEY, build_uid_xml, send_batch, send_to_target
 
 
 class TestBuildUidXml:
@@ -139,7 +139,8 @@ class TestSendBatch:
     @pytest.mark.asyncio
     async def test_empty_batch_noop(self):
         client = AsyncMock(spec=httpx.AsyncClient)
-        await send_batch(client, [], [])
+        result = await send_batch(client, [], [])
+        assert result == []
         client.post.assert_not_called()
 
     @pytest.mark.asyncio
@@ -153,12 +154,39 @@ class TestSendBatch:
         client = AsyncMock(spec=httpx.AsyncClient)
         client.post = AsyncMock(return_value=mock_resp)
 
-        await send_batch(
+        result = await send_batch(
             client,
             logins=[("user@example.edu", "10.1.1.1")],
             logouts=[],
         )
+        assert result == []
         assert client.post.call_count == 2
+
+        # Reset
+        os.environ["PA_TARGETS"] = "https://pa-test.example.com"
+        config._settings = None
+
+    @pytest.mark.asyncio
+    async def test_dead_letters_on_failure(self, fake_redis):
+        import os
+        os.environ["PA_TARGETS"] = "https://pa-fail.example.com"
+        from app import config
+        config._settings = None
+
+        mock_resp = httpx.Response(401, text="Unauthorized")
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(return_value=mock_resp)
+
+        result = await send_batch(
+            client,
+            logins=[("user@example.edu", "10.1.1.1")],
+            logouts=[],
+        )
+        assert result == ["https://pa-fail.example.com"]
+
+        # Verify DLQ entry was written
+        dlq_len = await fake_redis.llen(DLQ_KEY)
+        assert dlq_len == 1
 
         # Reset
         os.environ["PA_TARGETS"] = "https://pa-test.example.com"

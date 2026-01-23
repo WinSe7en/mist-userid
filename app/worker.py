@@ -9,6 +9,14 @@ import sdnotify
 
 from app.config import get_settings
 from app.dedup import is_duplicate
+from app.logging_config import configure_logging
+from app.metrics import (
+    BATCH_FLUSHES,
+    BATCH_SIZE,
+    EVENTS_DEDUPED,
+    EVENTS_PROCESSED,
+    QUEUE_DEPTH,
+)
 from app.paloalto import send_batch
 from app.redis_client import close_redis, get_redis
 from app.webhook import QUEUE_KEY
@@ -29,11 +37,7 @@ def classify_event(event: dict) -> str:
 
 async def run_worker() -> None:
     settings = get_settings()
-
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(settings)
 
     logger.info("Worker starting (batch_size=%d, flush_interval=%.1fs)",
                 settings.batch_size, settings.batch_flush_interval)
@@ -63,6 +67,13 @@ async def run_worker() -> None:
         while not shutdown_event.is_set():
             notifier.notify("WATCHDOG=1")
 
+            # Update queue depth gauge
+            try:
+                depth = await r.llen(QUEUE_KEY)
+                QUEUE_DEPTH.set(depth)
+            except Exception:
+                pass
+
             try:
                 result = await asyncio.wait_for(
                     r.brpop(QUEUE_KEY, timeout=1), timeout=2.0
@@ -88,6 +99,7 @@ async def run_worker() -> None:
 
                 if await is_duplicate(username, ip):
                     logger.debug("Dedup skip: user=%s ip=%s", username, ip)
+                    EVENTS_DEDUPED.inc()
                     continue
 
                 action = classify_event(event)
@@ -96,6 +108,7 @@ async def run_worker() -> None:
                     username, ip, action,
                     event.get("_topic"), event.get("next_ap", "N/A"),
                 )
+                EVENTS_PROCESSED.labels(action=action).inc()
 
                 if action == "login":
                     batch_logins[key] = (username, ip)
@@ -119,11 +132,13 @@ async def run_worker() -> None:
             )
 
             if should_flush:
+                trigger = "size" if total >= settings.batch_size else "timer"
                 logger.debug(
                     "Flushing batch: %d logins, %d logouts (trigger: %s)",
-                    len(batch_logins), len(batch_logouts),
-                    "size" if total >= settings.batch_size else "timer",
+                    len(batch_logins), len(batch_logouts), trigger,
                 )
+                BATCH_FLUSHES.labels(trigger=trigger).inc()
+                BATCH_SIZE.observe(total)
                 await send_batch(
                     client,
                     list(batch_logins.values()),
@@ -135,7 +150,10 @@ async def run_worker() -> None:
 
         # Graceful shutdown: flush remaining
         if batch_logins or batch_logouts:
+            total = len(batch_logins) + len(batch_logouts)
             logger.info("Flushing remaining batch before shutdown...")
+            BATCH_FLUSHES.labels(trigger="shutdown").inc()
+            BATCH_SIZE.observe(total)
             await send_batch(
                 client,
                 list(batch_logins.values()),

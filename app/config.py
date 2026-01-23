@@ -17,10 +17,18 @@ class Settings(BaseSettings):
     max_retry_attempts: int = 5
     userid_timeout: int = 60
     log_level: str = "INFO"
+    log_format: str = "text"
+    ignore_ssids: str = ""
 
     @property
     def pa_target_list(self) -> List[str]:
         return [t.strip() for t in self.pa_targets.split(",")]
+
+    @property
+    def ignore_ssid_set(self) -> set:
+        if not self.ignore_ssids:
+            return set()
+        return {s.strip().lower() for s in self.ignore_ssids.split(",")}
 
     model_config = {
         "env_file": ENV_FILE if os.access(ENV_FILE, os.R_OK) else None,

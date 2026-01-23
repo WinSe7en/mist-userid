@@ -1,10 +1,15 @@
 import logging
+
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app import __version__
 from app.config import get_settings
+from app.logging_config import configure_logging
 from app.redis_client import close_redis, get_redis
 from app.webhook import router as webhook_router
 
@@ -14,10 +19,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    logging.basicConfig(
-        level=getattr(logging, settings.log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(settings)
     logger.info("Mist User-ID API v%s starting", __version__)
     await get_redis()
     yield
@@ -40,7 +42,9 @@ async def health():
 
 @app.get("/ready")
 async def ready():
+    settings = get_settings()
     errors = []
+    targets_status = {}
 
     try:
         r = await get_redis()
@@ -48,6 +52,26 @@ async def ready():
     except Exception as e:
         errors.append(f"redis: {e}")
 
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(5.0, connect=3.0),
+        verify=True,
+    ) as client:
+        for target in settings.pa_target_list:
+            try:
+                resp = await client.head(target, follow_redirects=False)
+                targets_status[target] = "reachable"
+            except Exception as e:
+                targets_status[target] = f"unreachable: {type(e).__name__}"
+                errors.append(f"pa:{target}: {type(e).__name__}")
+
     if errors:
-        return {"status": "not ready", "errors": errors}
-    return {"status": "ready"}
+        return {"status": "not ready", "errors": errors, "targets": targets_status}
+    return {"status": "ready", "targets": targets_status}
+
+
+@app.get("/metrics")
+async def metrics():
+    return PlainTextResponse(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_LATEST,
+    )

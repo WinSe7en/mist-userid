@@ -44,9 +44,11 @@ selinux:
 	@echo "SELinux contexts and booleans configured"
 
 firewall:
-	firewall-cmd --permanent --add-service=https
+	firewall-cmd --permanent --remove-service=https 2>/dev/null || true
+	firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="10.60.1.0/24" service name="https" accept'
+	firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="10.8.0.0/16" service name="https" accept'
 	firewall-cmd --reload
-	@echo "Firewall: HTTPS (443/tcp) opened"
+	@echo "Firewall: HTTPS (443/tcp) opened for 10.60.1.0/24 and 10.8.0.0/16 only"
 
 deploy: install configure selinux firewall
 	cp deploy/mist-userid-api.service $(SERVICE_DIR)/
@@ -55,7 +57,7 @@ deploy: install configure selinux firewall
 	systemctl daemon-reload
 	systemctl enable mist-userid-api mist-userid-worker nginx
 	systemctl restart nginx
-	systemctl start mist-userid-api mist-userid-worker
+	systemctl restart mist-userid-api mist-userid-worker
 	@echo "Services deployed and started"
 
 test:
@@ -92,6 +94,7 @@ clean:
 	rm -f /etc/nginx/conf.d/mist-userid.conf
 	systemctl reload nginx 2>/dev/null || true
 	systemctl daemon-reload
-	firewall-cmd --permanent --remove-service=https 2>/dev/null || true
+	firewall-cmd --permanent --remove-rich-rule='rule family="ipv4" source address="10.60.1.0/24" service name="https" accept' 2>/dev/null || true
+	firewall-cmd --permanent --remove-rich-rule='rule family="ipv4" source address="10.8.0.0/16" service name="https" accept' 2>/dev/null || true
 	firewall-cmd --reload 2>/dev/null || true
 	rm -rf $(INSTALL_DIR)

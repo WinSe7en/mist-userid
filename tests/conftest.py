@@ -20,6 +20,7 @@ os.environ.update({
     "MAX_RETRY_ATTEMPTS": "3",
     "USERID_TIMEOUT": "60",
     "LOG_LEVEL": "DEBUG",
+    "LOG_FORMAT": "text",
 })
 
 

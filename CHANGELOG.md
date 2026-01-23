@@ -1,30 +1,30 @@
 # Changelog
 
-## [0.2.0] - Unreleased (Roadmap)
+## [0.2.0] - 2026-01-23
 
-### Observability
-- Prometheus metrics endpoint (`/metrics`) — event counts, batch success/failure rates, queue depth, PA response times
-- Structured JSON logging option for log aggregation
+### Added
+- Prometheus metrics endpoint (`/metrics`) with counters for events received/queued/rejected/deduped/processed, batch flushes, PA API requests/latency, DLQ events, and queue depth gauge
+- Structured JSON logging via `LOG_FORMAT=json` setting (uses `python-json-logger`)
+- Dead-letter queue (`userid_dlq` Redis list) for batches that fail after all retries exhausted
+- Enhanced `/ready` endpoint that probes Redis ping + HTTPS connectivity to each PA target
+- `app/metrics.py` — centralized Prometheus metric definitions
+- `app/logging_config.py` — shared logging configuration for API and worker
+- `tests/test_metrics.py` — metrics increment verification tests
 
-### Reliability
-- Verify dedup is wired into worker loop (module exists but may not be called)
-- Dead-letter queue for events that fail after max retries
-- `/ready` endpoint that probes Redis ping + PA target connectivity
+### Changed
+- `send_batch()` now returns `list[str]` of failed target URLs (was `None`)
+- Worker loop updates `mist_userid_queue_depth` gauge each iteration
+- Worker records batch flush trigger (size/timer/shutdown) in metrics
 
-### HA / F5 Prep
-- Shared/external Redis support (two app instances behind F5)
-- Stateless verification (no local state that breaks with multiple nodes)
-- F5 health monitor compatible responses
+### Confirmed
+- Deduplication was already wired into worker loop at `app/worker.py:89` — no code change needed
 
-### Operational
+### Future (Roadmap)
+- Shared/external Redis support for HA (two app instances behind F5)
 - `locustfile.py` for load testing (validate 100 events/sec capacity)
 - `make status` target showing queue depth, event rates, service health
 - PA API key rotation without downtime (reload on SIGHUP)
-
-### Filtering / Safety
-- Site filtering — only process events from specific `site_id` values
-- Rate limiting on webhook endpoint (Redis-based)
-- Username domain filtering (only push `@example.edu`, ignore guest accounts)
+- Site filtering, rate limiting, username domain filtering
 
 ## [0.1.0] - 2025-01-22
 

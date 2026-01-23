@@ -1,5 +1,7 @@
 import json
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 
@@ -12,9 +14,35 @@ async def test_health(client):
 
 @pytest.mark.asyncio
 async def test_ready_with_redis(client, fake_redis):
-    resp = await client.get("/ready")
+    mock_resp = httpx.Response(200)
+    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.head = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        resp = await client.get("/ready")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ready"
+    data = resp.json()
+    assert data["status"] == "ready"
+    assert "targets" in data
+
+
+@pytest.mark.asyncio
+async def test_ready_reports_unreachable_target(client, fake_redis):
+    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.head = AsyncMock(side_effect=httpx.ConnectError("refused"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        resp = await client.get("/ready")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "not ready"
+    assert any("pa:" in e for e in data["errors"])
 
 
 @pytest.mark.asyncio
