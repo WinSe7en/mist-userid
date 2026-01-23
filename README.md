@@ -32,7 +32,7 @@ Mist Cloud                    Your Server                         PA Firewalls
 ## Prerequisites
 
 - Python 3.11+
-- Redis server
+- Redis server — serves as both the event queue (decouples the API from the worker) and the deduplication cache (prevents repeated User-ID updates for the same user+IP within the TTL window). Install with `sudo dnf install redis && sudo systemctl enable --now redis`
 - RHEL 9 (or compatible Linux with systemd)
 - Juniper Mist site with 802.1X (eduroam) or PSK wireless
 - Palo Alto firewall or Panorama with API access
