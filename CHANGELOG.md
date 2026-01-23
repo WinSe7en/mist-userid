@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.0] - Unreleased (Roadmap)
+
+### Observability
+- Prometheus metrics endpoint (`/metrics`) — event counts, batch success/failure rates, queue depth, PA response times
+- Structured JSON logging option for log aggregation
+
+### Reliability
+- Verify dedup is wired into worker loop (module exists but may not be called)
+- Dead-letter queue for events that fail after max retries
+- `/ready` endpoint that probes Redis ping + PA target connectivity
+
+### HA / F5 Prep
+- Shared/external Redis support (two app instances behind F5)
+- Stateless verification (no local state that breaks with multiple nodes)
+- F5 health monitor compatible responses
+
+### Operational
+- `locustfile.py` for load testing (validate 100 events/sec capacity)
+- `make status` target showing queue depth, event rates, service health
+- PA API key rotation without downtime (reload on SIGHUP)
+
+### Filtering / Safety
+- Site filtering — only process events from specific `site_id` values
+- Rate limiting on webhook endpoint (Redis-based)
+- Username domain filtering (only push `@example.edu`, ignore guest accounts)
+
 ## [0.1.0] - 2025-01-22
 
 ### Added
