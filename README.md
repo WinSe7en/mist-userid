@@ -278,6 +278,17 @@ sudo firewall-cmd --reload
 - The systemd `MemoryMax` will kill and restart the process if it exceeds limits
 - Normal memory usage should be well under 100M
 
+## Future: High Availability (F5)
+
+Production plan: two instances behind an F5 load balancer for zero-downtime patching.
+
+- **API**: Stateless — F5 round-robins between both boxes, no session affinity needed
+- **Worker**: Safe to run on both boxes — Redis `BRPOP` is atomic, each event consumed by exactly one worker
+- **Redis**: Must be shared between both boxes (dedicated Redis host or networked Redis with sentinel)
+- **TLS**: F5 terminates TLS, backends use HTTP on port 8000
+
+When ready, change `REDIS_URL` on both boxes to point to the shared Redis host and remove the local nginx proxy.
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.

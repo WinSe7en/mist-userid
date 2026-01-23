@@ -44,15 +44,17 @@ selinux:
 	@echo "SELinux contexts and booleans configured"
 
 firewall:
-	firewall-cmd --permanent --add-port=8000/tcp
+	firewall-cmd --permanent --add-service=https
 	firewall-cmd --reload
-	@echo "Firewall: port 8000/tcp opened"
+	@echo "Firewall: HTTPS (443/tcp) opened"
 
 deploy: install configure selinux firewall
 	cp deploy/mist-userid-api.service $(SERVICE_DIR)/
 	cp deploy/mist-userid-worker.service $(SERVICE_DIR)/
+	cp deploy/nginx-mist-userid.conf /etc/nginx/conf.d/mist-userid.conf
 	systemctl daemon-reload
-	systemctl enable mist-userid-api mist-userid-worker
+	systemctl enable mist-userid-api mist-userid-worker nginx
+	systemctl restart nginx
 	systemctl start mist-userid-api mist-userid-worker
 	@echo "Services deployed and started"
 
@@ -87,7 +89,9 @@ clean:
 	systemctl stop mist-userid-api mist-userid-worker || true
 	systemctl disable mist-userid-api mist-userid-worker || true
 	rm -f $(SERVICE_DIR)/mist-userid-api.service $(SERVICE_DIR)/mist-userid-worker.service
+	rm -f /etc/nginx/conf.d/mist-userid.conf
+	systemctl reload nginx 2>/dev/null || true
 	systemctl daemon-reload
-	firewall-cmd --permanent --remove-port=8000/tcp 2>/dev/null || true
+	firewall-cmd --permanent --remove-service=https 2>/dev/null || true
 	firewall-cmd --reload 2>/dev/null || true
 	rm -rf $(INSTALL_DIR)
