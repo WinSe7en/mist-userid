@@ -9,7 +9,6 @@ ExecStart=/opt/mist-userid/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port
 WorkingDirectory=/opt/mist-userid
 Restart=always
 RestartSec=5
-WatchdogSec=30
 
 # Memory protection
 MemoryMax=512M

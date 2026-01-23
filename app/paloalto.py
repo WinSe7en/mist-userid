@@ -41,16 +41,17 @@ async def send_to_target(
     max_retries: int,
 ) -> bool:
     url = f"{target.rstrip('/')}/api/"
-    params = {"type": "user-id"}
-    headers = {"X-PAN-KEY": api_key, "Content-Type": "application/xml"}
+    data = {
+        "type": "user-id",
+        "key": api_key,
+        "cmd": xml_body,
+    }
 
     logger.debug("Sending to target %s (max_retries=%d)", target, max_retries)
 
     for attempt in range(max_retries + 1):
         try:
-            resp = await client.post(
-                url, params=params, content=xml_body, headers=headers
-            )
+            resp = await client.post(url, data=data)
 
             if resp.status_code == 200 and "success" in resp.text:
                 logger.debug("Success from %s (attempt %d): %s",

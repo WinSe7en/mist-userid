@@ -1,6 +1,9 @@
+import os
 from typing import List, Optional
 
 from pydantic_settings import BaseSettings
+
+ENV_FILE = "/etc/mist-userid/env"
 
 
 class Settings(BaseSettings):
@@ -19,7 +22,10 @@ class Settings(BaseSettings):
     def pa_target_list(self) -> List[str]:
         return [t.strip() for t in self.pa_targets.split(",")]
 
-    model_config = {"env_file": "/etc/mist-userid/env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ENV_FILE if os.access(ENV_FILE, os.R_OK) else None,
+        "env_file_encoding": "utf-8",
+    }
 
 
 _settings: Optional[Settings] = None
