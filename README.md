@@ -105,6 +105,8 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 | `MAX_RETRY_ATTEMPTS` | No | `5` | PA API retry limit |
 | `USERID_TIMEOUT` | No | `60` | PA User-ID timeout in minutes |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
+| `LOG_FORMAT` | No | `text` | Log format: `text` or `json` |
+| `IGNORE_SSIDS` | No | *(empty)* | Comma-separated SSIDs to ignore (case-insensitive) |
 
 ### Multi-Target Example
 
@@ -154,12 +156,84 @@ Both services:
 - Security hardened (`NoNewPrivileges`, read-only filesystem)
 - Environment from `/etc/mist-userid/env`
 
-## Health Checks
+## Health Checks & Metrics
 
 | Endpoint | Purpose | Success |
 |----------|---------|---------|
 | `GET /health` | Liveness — app is running | `{"status": "ok"}` |
-| `GET /ready` | Readiness — Redis connected | `{"status": "ready"}` |
+| `GET /ready` | Readiness — Redis + PA targets reachable | `{"status": "ready", "targets": {...}}` |
+| `GET /metrics` | Prometheus metrics (text format) | Counters, histograms, gauges |
+
+## Logging
+
+### Changing the Log Level
+
+Edit `/etc/mist-userid/env` and restart the affected service:
+
+```bash
+# Set desired level
+sudo sed -i 's/^LOG_LEVEL=.*/LOG_LEVEL=DEBUG/' /etc/mist-userid/env
+
+# Restart (worker, API, or both)
+sudo systemctl restart mist-userid-worker mist-userid-api
+
+# View logs
+journalctl -u mist-userid-worker -f
+journalctl -u mist-userid-api -f
+```
+
+### Log Levels
+
+| Level | When to Use | What You'll See |
+|-------|-------------|-----------------|
+| `ERROR` | Production (quiet) | PA API auth failures, DLQ writes, unexpected exceptions |
+| `WARNING` | Production (default recommended) | Transient PA errors with retries, dead-lettered batches, invalid queue entries |
+| `INFO` | Production (verbose) | Batch sends (target count, login/logout counts), service start/stop, PA API HTTP status |
+| `DEBUG` | Troubleshooting only | Individual user+IP events, dedup hits/misses, XML payloads, SSID filtering, queue operations |
+
+**Recommendation**: Run `INFO` in production. Switch to `DEBUG` temporarily when troubleshooting a specific user or verifying mappings, then switch back — DEBUG is noisy at high event rates.
+
+### JSON Logging
+
+For log aggregation (Splunk, ELK, etc.), switch to structured JSON output:
+
+```bash
+# In /etc/mist-userid/env
+LOG_FORMAT=json
+```
+
+Each log line becomes a JSON object with `timestamp`, `level`, `logger`, and `message` fields.
+
+### What Each Level Shows
+
+**DEBUG** (most verbose):
+```
+Event: user=john.doe@example.edu ip=10.5.63.6 action=login topic=client-join next_ap=N/A
+Dedup skip: user=john.doe@example.edu ip=10.5.63.6
+Skipping event: ignored SSID=DU Guest WiFi
+Flushing batch: 3 logins, 1 logouts (trigger: timer)
+XML payload (245 bytes): <uid-message>...
+```
+
+**INFO**:
+```
+Sending batch to 1 targets: 3 logins, 1 logouts
+Worker starting (batch_size=50, flush_interval=2.0s)
+HTTP Request: POST https://pa-fw1.example.com/api/ "HTTP/1.1 200 OK"
+```
+
+**WARNING**:
+```
+Transient error 503 from https://pa-fw1.example.com, retry 1/5 in 1s
+Dead-lettered batch (3 logins, 1 logouts) for targets: https://pa-fw1.example.com
+```
+
+**ERROR**:
+```
+Permanent auth failure from https://pa-fw1.example.com: 401
+Max retries reached for https://pa-fw1.example.com (last status: 503)
+Failed to write to DLQ: ConnectionError
+```
 
 ## Development
 
