@@ -224,6 +224,55 @@ pytest tests/test_webhook.py -v
 - This is normal — the same user+IP pair won't be re-sent within 5 minutes
 - Adjust `DEDUP_TTL` if you need more frequent updates
 
+### SELinux denials
+
+The `make deploy` target runs `make selinux` automatically, which configures port contexts, file contexts, and network booleans. If you still see issues:
+
+```bash
+# Check for recent AVC denials
+sudo ausearch -m avc -ts recent
+
+# Verify the services are running in the expected domain
+ps -eZ | grep mist-userid
+
+# Check port 8000 is labeled correctly
+sudo semanage port -l | grep 8000
+
+# Check file contexts on the venv
+ls -Z /opt/mist-userid/venv/bin/python
+
+# Verify network boolean is set
+getsebool httpd_can_network_connect
+```
+
+If denials persist, generate and install a targeted policy module:
+```bash
+sudo ausearch -m avc -ts recent | audit2allow -M mist-userid
+sudo semodule -i mist-userid.pp
+```
+
+To re-run SELinux setup after changes:
+```bash
+sudo make selinux
+```
+
+### Firewall (firewalld)
+
+Port 8000/tcp is opened automatically by `make deploy`. To verify or manage manually:
+
+```bash
+# Check if port is open
+sudo firewall-cmd --list-ports
+
+# Open manually
+sudo firewall-cmd --permanent --add-port=8000/tcp
+sudo firewall-cmd --reload
+
+# Remove
+sudo firewall-cmd --permanent --remove-port=8000/tcp
+sudo firewall-cmd --reload
+```
+
 ### Memory usage growing
 - Check `systemctl status mist-userid-worker` for memory stats
 - The systemd `MemoryMax` will kill and restart the process if it exceeds limits

@@ -44,6 +44,8 @@ async def send_to_target(
     params = {"type": "user-id"}
     headers = {"X-PAN-KEY": api_key, "Content-Type": "application/xml"}
 
+    logger.debug("Sending to target %s (max_retries=%d)", target, max_retries)
+
     for attempt in range(max_retries + 1):
         try:
             resp = await client.post(
@@ -51,6 +53,8 @@ async def send_to_target(
             )
 
             if resp.status_code == 200 and "success" in resp.text:
+                logger.debug("Success from %s (attempt %d): %s",
+                             target, attempt + 1, resp.text[:100])
                 return True
 
             if resp.status_code in {401, 403}:
@@ -109,6 +113,7 @@ async def send_batch(
         "Sending batch to %d targets: %d logins, %d logouts",
         len(settings.pa_target_list), len(logins), len(logouts),
     )
+    logger.debug("XML payload (%d bytes): %s", len(xml_body), xml_body)
 
     results = await asyncio.gather(
         *[

@@ -1,5 +1,9 @@
+import logging
+
 from app.config import get_settings
 from app.redis_client import get_redis
+
+logger = logging.getLogger(__name__)
 
 
 async def is_duplicate(username: str, ip: str) -> bool:
@@ -9,4 +13,9 @@ async def is_duplicate(username: str, ip: str) -> bool:
     was_set = await r.set(key, "1", nx=True, ex=settings.dedup_ttl)
     # SET NX returns True if key was newly set (not a duplicate)
     # Returns None if key already existed (is a duplicate)
-    return was_set is None
+    duplicate = was_set is None
+    if duplicate:
+        logger.debug("Dedup HIT: %s (TTL %ds remaining)", key, settings.dedup_ttl)
+    else:
+        logger.debug("Dedup MISS (new): %s (TTL %ds)", key, settings.dedup_ttl)
+    return duplicate

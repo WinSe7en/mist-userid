@@ -4,14 +4,24 @@ VENV := $(INSTALL_DIR)/venv
 PYTHON := $(VENV)/bin/python
 SERVICE_DIR := /etc/systemd/system
 
-.PHONY: install configure deploy test status start stop restart logs clean
+.PHONY: install update configure selinux firewall deploy test status start stop restart logs clean
 
 install:
 	mkdir -p $(INSTALL_DIR)
 	cp -r app requirements.txt $(INSTALL_DIR)/
 	python3 -m venv $(VENV)
+	$(VENV)/bin/python -m ensurepip
 	$(VENV)/bin/pip install --upgrade pip
 	$(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements.txt
+	$(VENV)/bin/pip uninstall pip setuptools -y
+	rm -rf $(VENV)/bin/pip*
+
+update:
+	$(VENV)/bin/python -m ensurepip
+	$(VENV)/bin/pip install --upgrade pip
+	$(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements.txt --upgrade
+	$(VENV)/bin/pip uninstall pip setuptools -y
+	rm -rf $(VENV)/bin/pip*
 
 configure:
 	mkdir -p $(CONF_DIR)
@@ -23,7 +33,22 @@ configure:
 		echo "$(CONF_DIR)/env already exists, skipping"; \
 	fi
 
-deploy: install configure
+selinux:
+	semanage port -l | grep -q "http_port_t.*8000" || \
+		semanage port -a -t http_port_t -p tcp 8000
+	semanage fcontext -a -t bin_t "$(INSTALL_DIR)/venv/bin(/.*)?" 2>/dev/null || \
+		semanage fcontext -m -t bin_t "$(INSTALL_DIR)/venv/bin(/.*)?"
+	restorecon -Rv $(INSTALL_DIR)/venv/bin
+	restorecon -Rv $(CONF_DIR) 2>/dev/null || true
+	setsebool -P httpd_can_network_connect 1
+	@echo "SELinux contexts and booleans configured"
+
+firewall:
+	firewall-cmd --permanent --add-port=8000/tcp
+	firewall-cmd --reload
+	@echo "Firewall: port 8000/tcp opened"
+
+deploy: install configure selinux firewall
 	cp deploy/mist-userid-api.service $(SERVICE_DIR)/
 	cp deploy/mist-userid-worker.service $(SERVICE_DIR)/
 	systemctl daemon-reload
@@ -32,8 +57,11 @@ deploy: install configure
 	@echo "Services deployed and started"
 
 test:
-	pip install -r requirements-dev.txt
-	pytest -v
+	$(VENV)/bin/python -m ensurepip
+	$(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements-dev.txt
+	$(VENV)/bin/python -m pytest -v
+	$(VENV)/bin/pip uninstall pip setuptools -y
+	rm -rf $(VENV)/bin/pip*
 
 status:
 	@systemctl status mist-userid-api --no-pager || true
@@ -60,4 +88,6 @@ clean:
 	systemctl disable mist-userid-api mist-userid-worker || true
 	rm -f $(SERVICE_DIR)/mist-userid-api.service $(SERVICE_DIR)/mist-userid-worker.service
 	systemctl daemon-reload
+	firewall-cmd --permanent --remove-port=8000/tcp 2>/dev/null || true
+	firewall-cmd --reload 2>/dev/null || true
 	rm -rf $(INSTALL_DIR)

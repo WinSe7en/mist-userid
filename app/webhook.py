@@ -43,6 +43,8 @@ async def receive_webhook(request: Request) -> Response:
     settings = get_settings()
     body = await request.body()
 
+    logger.debug("Received webhook: %d bytes", len(body))
+
     signature = request.headers.get("X-Mist-Signature-v2")
     if not verify_signature(settings.mist_webhook_secret, body, signature):
         logger.warning("Webhook signature validation failed")
@@ -51,29 +53,40 @@ async def receive_webhook(request: Request) -> Response:
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
+        logger.debug("Failed to parse webhook body as JSON")
         return Response(status_code=400)
 
     topic = payload.get("topic")
     if topic not in VALID_TOPICS:
+        logger.debug("Ignoring unhandled topic: %s", topic)
         return Response(status_code=202)
+
+    events = payload.get("events", [])
+    logger.debug("Processing topic=%s with %d events", topic, len(events))
 
     r = await get_redis()
     queued = 0
 
-    for event in payload.get("events", []):
+    for event in events:
         username = extract_username(event)
         ip = event.get("client_ip")
 
-        if not username or not ip:
+        if not username:
+            logger.debug("Skipping event: no username (mac=%s)", event.get("mac"))
+            continue
+        if not ip:
+            logger.debug("Skipping event: no IP for user=%s", username)
             continue
         if not is_valid_ip(ip):
+            logger.debug("Skipping event: invalid IP=%s for user=%s", ip, username)
             continue
 
         event["_topic"] = topic
         await r.lpush(QUEUE_KEY, json.dumps(event))
         queued += 1
+        logger.debug("Queued: user=%s ip=%s topic=%s", username, ip, topic)
 
-    logger.debug("Queued %d events from %s", queued, topic)
+    logger.debug("Queued %d/%d events from %s", queued, len(events), topic)
     return Response(
         content=json.dumps({"status": "accepted", "queued": queued}),
         status_code=202,

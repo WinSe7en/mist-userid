@@ -81,20 +81,35 @@ async def run_worker() -> None:
                 username = event.get("client_username") or event.get("psk_name")
                 ip = event.get("client_ip")
                 if not username or not ip:
+                    logger.debug("Skipping event from queue: missing username or IP")
                     continue
 
                 key = (username, ip)
 
                 if await is_duplicate(username, ip):
+                    logger.debug("Dedup skip: user=%s ip=%s", username, ip)
                     continue
 
                 action = classify_event(event)
+                logger.debug(
+                    "Event: user=%s ip=%s action=%s topic=%s next_ap=%s",
+                    username, ip, action,
+                    event.get("_topic"), event.get("next_ap", "N/A"),
+                )
+
                 if action == "login":
                     batch_logins[key] = (username, ip)
-                    batch_logouts.pop(key, None)
+                    if key in batch_logouts:
+                        logger.debug("Login supersedes logout: user=%s ip=%s", username, ip)
+                        batch_logouts.pop(key, None)
                 else:
                     if key not in batch_logins:
                         batch_logouts[key] = (username, ip)
+                    else:
+                        logger.debug(
+                            "Logout ignored (login already in batch): user=%s ip=%s",
+                            username, ip,
+                        )
 
             total = len(batch_logins) + len(batch_logouts)
             elapsed = time.monotonic() - last_flush
@@ -104,6 +119,11 @@ async def run_worker() -> None:
             )
 
             if should_flush:
+                logger.debug(
+                    "Flushing batch: %d logins, %d logouts (trigger: %s)",
+                    len(batch_logins), len(batch_logouts),
+                    "size" if total >= settings.batch_size else "timer",
+                )
                 await send_batch(
                     client,
                     list(batch_logins.values()),
