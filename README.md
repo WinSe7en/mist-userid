@@ -31,7 +31,7 @@ Mist Cloud                    Your Server                         PA Firewalls
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.9+
 - Redis server — serves as both the event queue (decouples the API from the worker) and the deduplication cache (prevents repeated User-ID updates for the same user+IP within the TTL window). Install with `sudo dnf install redis && sudo systemctl enable --now redis`
 - RHEL 9 (or compatible Linux with systemd)
 - Juniper Mist site with 802.1X (eduroam) or PSK wireless
@@ -41,7 +41,7 @@ Mist Cloud                    Your Server                         PA Firewalls
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/mist-userid.git
+git clone https://github.com/WinSe7en/mist-userid.git
 cd mist-userid
 
 # Install
@@ -81,13 +81,27 @@ The receiver uses the `client_username` field (802.1X identity) or `psk_name` fi
 | `client-sessions` | `next_ap` is a real MAC | Login (roam refresh) |
 | `client-sessions` | `next_ap == "000000000000"` | Logout (disconnect) |
 
-## Palo Alto API Key
+## Palo Alto Authentication
+
+You have two options for authenticating with the PA firewall:
+
+### Option 1: API Key (static)
 
 1. Log into your PA firewall or Panorama
 2. Navigate to **Device > Administrators** (or use an existing service account)
 3. Go to **Device > API Keys** and generate a key for the service account
 4. The key needs permission to use the User-ID XML API (`/api/?type=user-id`)
 5. Set the key as `PA_API_KEY` in `/etc/mist-userid/env`
+
+### Option 2: Admin Credentials (auto-generate key)
+
+Instead of a static API key, you can provide admin credentials and the service will automatically generate an API key at startup:
+
+1. Create a service account on the PA firewall with XML API permissions
+2. Set `PA_USERNAME` and `PA_PASSWORD` in `/etc/mist-userid/env`
+3. Leave `PA_API_KEY` unset or empty
+
+The key is generated once at startup, cached in memory, and auto-refreshes if it becomes invalid (e.g., after a password change). This is useful for environments where API keys shouldn't be stored in config files.
 
 ## Configuration Reference
 
@@ -96,7 +110,9 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PA_TARGETS` | Yes | - | Comma-separated PA firewall/Panorama URLs |
-| `PA_API_KEY` | Yes | - | API key for PA XML API |
+| `PA_API_KEY` | Cond. | - | API key for PA XML API (required if username/password not set) |
+| `PA_USERNAME` | Cond. | - | PA admin username for auto-generating API key |
+| `PA_PASSWORD` | Cond. | - | PA admin password for auto-generating API key |
 | `MIST_WEBHOOK_SECRET` | Yes | - | Shared secret for webhook HMAC validation |
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection string |
 | `BATCH_SIZE` | No | `50` | Max items per PA API batch |

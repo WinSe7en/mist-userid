@@ -59,10 +59,10 @@ dev = [
 mist-userid-worker = "app.worker:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/mist-userid"
-Documentation = "https://github.com/yourusername/mist-userid#readme"
-Repository = "https://github.com/yourusername/mist-userid.git"
-Issues = "https://github.com/yourusername/mist-userid/issues"
+Homepage = "https://github.com/WinSe7en/mist-userid"
+Documentation = "https://github.com/WinSe7en/mist-userid#readme"
+Repository = "https://github.com/WinSe7en/mist-userid.git"
+Issues = "https://github.com/WinSe7en/mist-userid/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
