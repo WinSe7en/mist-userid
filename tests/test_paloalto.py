@@ -5,7 +5,16 @@ from xml.etree.ElementTree import fromstring
 import httpx
 import pytest
 
+from app import pa_auth
 from app.paloalto import DLQ_KEY, build_uid_xml, send_batch, send_to_target
+
+
+@pytest.fixture(autouse=True)
+def reset_cached_key():
+    """Reset cached API key between tests."""
+    pa_auth._cached_api_key = None
+    yield
+    pa_auth._cached_api_key = None
 
 
 class TestBuildUidXml:
@@ -75,7 +84,8 @@ class TestSendToTarget:
         client.post.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_permanent_failure_no_retry(self):
+    async def test_401_attempts_key_refresh_then_fails(self):
+        """401 triggers key refresh attempt; with static key, retry fails."""
         mock_resp = httpx.Response(401, text="Unauthorized")
         client = AsyncMock(spec=httpx.AsyncClient)
         client.post = AsyncMock(return_value=mock_resp)
@@ -84,7 +94,22 @@ class TestSendToTarget:
             client, "https://pa.example.com", "<xml/>", "key", max_retries=3
         )
         assert result is False
-        assert client.post.call_count == 1  # no retries
+        # First call fails with 401, triggers refresh (returns static key),
+        # retry also fails with 401 (allow_key_refresh=False)
+        assert client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_403_permanent_failure_no_retry(self):
+        """403 is a permanent failure with no retry."""
+        mock_resp = httpx.Response(403, text="Forbidden")
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(return_value=mock_resp)
+
+        result = await send_to_target(
+            client, "https://pa.example.com", "<xml/>", "key", max_retries=3
+        )
+        assert result is False
+        assert client.post.call_count == 1  # no retries for 403
 
     @pytest.mark.asyncio
     async def test_transient_failure_retries(self):
@@ -200,7 +225,8 @@ class TestSendBatch:
         from app import config
         config._settings = None
 
-        mock_resp = httpx.Response(401, text="Unauthorized")
+        # Use 403 which doesn't trigger key refresh
+        mock_resp = httpx.Response(403, text="Forbidden")
         client = AsyncMock(spec=httpx.AsyncClient)
         client.post = AsyncMock(return_value=mock_resp)
 

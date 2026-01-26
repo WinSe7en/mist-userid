@@ -10,6 +10,7 @@ from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from app import __version__
 from app.config import get_settings
 from app.logging_config import configure_logging
+from app.pa_auth import get_api_key
 from app.redis_client import close_redis, get_redis
 from app.webhook import router as webhook_router
 
@@ -45,6 +46,7 @@ async def ready():
     settings = get_settings()
     errors = []
     targets_status = {}
+    api_key_status = "unknown"
 
     try:
         r = await get_redis()
@@ -56,6 +58,14 @@ async def ready():
         timeout=httpx.Timeout(5.0, connect=3.0),
         verify=True,
     ) as client:
+        # Verify API key is obtainable (static or generatable)
+        try:
+            await get_api_key(client)
+            api_key_status = "valid"
+        except Exception as e:
+            api_key_status = f"error: {e}"
+            errors.append(f"api_key: {e}")
+
         for target in settings.pa_target_list:
             try:
                 resp = await client.head(target, follow_redirects=False)
@@ -65,8 +75,8 @@ async def ready():
                 errors.append(f"pa:{target}: {type(e).__name__}")
 
     if errors:
-        return {"status": "not ready", "errors": errors, "targets": targets_status}
-    return {"status": "ready", "targets": targets_status}
+        return {"status": "not ready", "errors": errors, "targets": targets_status, "api_key": api_key_status}
+    return {"status": "ready", "targets": targets_status, "api_key": api_key_status}
 
 
 @app.get("/metrics")

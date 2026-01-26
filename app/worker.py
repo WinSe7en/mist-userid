@@ -18,6 +18,7 @@ from app.metrics import (
     EVENTS_PROCESSED,
     QUEUE_DEPTH,
 )
+from app.pa_auth import get_api_key
 from app.paloalto import send_batch
 from app.redis_client import close_redis, get_redis
 from app.utils import sanitize_username
@@ -82,6 +83,14 @@ async def run_worker() -> None:
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         verify=True,
     ) as client:
+        # Pre-generate/validate API key at startup (fail fast if credentials invalid)
+        try:
+            await get_api_key(client)
+            logger.info("API key validated/generated successfully")
+        except Exception as e:
+            logger.error("Failed to obtain API key at startup: %s", e)
+            raise
+
         batch_logins: dict[tuple[str, str], tuple[str, str]] = {}
         batch_logouts: dict[tuple[str, str], tuple[str, str]] = {}
         last_flush = time.monotonic()

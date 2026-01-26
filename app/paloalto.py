@@ -8,6 +8,7 @@ import httpx
 
 from app.config import get_settings
 from app.metrics import DLQ_EVENTS, PA_REQUEST_DURATION, PA_REQUESTS
+from app.pa_auth import get_api_key, invalidate_api_key
 from app.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ async def send_to_target(
     xml_body: str,
     api_key: str,
     max_retries: int,
+    allow_key_refresh: bool = True,
 ) -> bool:
     url = f"{target.rstrip('/')}/api/"
     data = {
@@ -79,7 +81,32 @@ async def send_to_target(
                     PA_REQUESTS.labels(target=target, status="success").inc()
                     return True
 
-            if resp.status_code in {401, 403}:
+            if resp.status_code == 401:
+                if allow_key_refresh:
+                    logger.warning(
+                        "Auth failure (401) from %s, attempting key refresh", target
+                    )
+                    invalidate_api_key()
+                    try:
+                        new_key = await get_api_key(client)
+                        logger.info("Regenerated API key, retrying request to %s", target)
+                        return await send_to_target(
+                            client, target, xml_body, new_key, max_retries,
+                            allow_key_refresh=False,
+                        )
+                    except Exception as e:
+                        logger.error("Failed to regenerate API key: %s", e)
+                        PA_REQUESTS.labels(target=target, status="failure").inc()
+                        return False
+                else:
+                    logger.error(
+                        "Permanent auth failure from %s: 401 (already refreshed key)",
+                        target,
+                    )
+                    PA_REQUESTS.labels(target=target, status="failure").inc()
+                    return False
+
+            if resp.status_code == 403:
                 logger.error(
                     "Permanent auth failure from %s: %d", target, resp.status_code
                 )
@@ -144,11 +171,14 @@ async def send_batch(
     )
     logger.debug("XML payload (%d bytes): %s", len(xml_body), xml_body)
 
+    # Get API key once for all targets
+    api_key = await get_api_key(client)
+
     results = await asyncio.gather(
         *[
             send_to_target(
                 client, target, xml_body,
-                settings.pa_api_key, settings.max_retry_attempts,
+                api_key, settings.max_retry_attempts,
             )
             for target in settings.pa_target_list
         ],
