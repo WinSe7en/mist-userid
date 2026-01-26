@@ -61,11 +61,23 @@ async def send_to_target(
             duration = time.monotonic() - start
             PA_REQUEST_DURATION.labels(target=target).observe(duration)
 
-            if resp.status_code == 200 and "success" in resp.text:
-                logger.debug("Success from %s (attempt %d): %s",
-                             target, attempt + 1, resp.text[:100])
-                PA_REQUESTS.labels(target=target, status="success").inc()
-                return True
+            if resp.status_code == 200:
+                # Check for success or benign logout failures
+                if "success" in resp.text:
+                    logger.debug("Success from %s (attempt %d): %s",
+                                 target, attempt + 1, resp.text[:100])
+                    PA_REQUESTS.labels(target=target, status="success").inc()
+                    return True
+
+                # "Delete mapping failed" means logout for non-existent user — benign
+                # This happens when the mapping already timed out or was never created
+                if "Delete mapping failed" in resp.text and "status=\"error\"" in resp.text:
+                    logger.debug(
+                        "Benign logout failure from %s (user not in table): %s",
+                        target, resp.text[:200],
+                    )
+                    PA_REQUESTS.labels(target=target, status="success").inc()
+                    return True
 
             if resp.status_code in {401, 403}:
                 logger.error(

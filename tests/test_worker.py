@@ -1,6 +1,6 @@
 import pytest
 
-from app.worker import classify_event
+from app.worker import classify_event, validate_username, MAX_USERNAME_LENGTH
 
 
 class TestClassifyEvent:
@@ -39,3 +39,59 @@ class TestClassifyEvent:
     def test_missing_topic_with_real_next_ap_is_login(self):
         event = {"next_ap": "020000000a07"}
         assert classify_event(event) == "login"
+
+
+class TestValidateUsername:
+    def test_valid_username(self):
+        is_valid, reason = validate_username("jsmith@example.edu")
+        assert is_valid is True
+        assert reason == ""
+
+    def test_valid_username_with_special_chars(self):
+        is_valid, reason = validate_username("user.name+tag@example.edu")
+        assert is_valid is True
+        assert reason == ""
+
+    def test_valid_username_max_length(self):
+        username = "a" * MAX_USERNAME_LENGTH
+        is_valid, reason = validate_username(username)
+        assert is_valid is True
+        assert reason == ""
+
+    def test_too_long_username(self):
+        username = "a" * (MAX_USERNAME_LENGTH + 1)
+        is_valid, reason = validate_username(username)
+        assert is_valid is False
+        assert reason == "too_long"
+
+    def test_null_byte_rejected(self):
+        is_valid, reason = validate_username("user\x00name@example.edu")
+        assert is_valid is False
+        assert reason == "control_chars"  # null is < 32, caught by control char check
+
+    def test_control_char_newline_rejected(self):
+        is_valid, reason = validate_username("user\nname@example.edu")
+        assert is_valid is False
+        assert reason == "control_chars"
+
+    def test_control_char_tab_rejected(self):
+        is_valid, reason = validate_username("user\tname@example.edu")
+        assert is_valid is False
+        assert reason == "control_chars"
+
+    def test_control_char_carriage_return_rejected(self):
+        is_valid, reason = validate_username("user\rname@example.edu")
+        assert is_valid is False
+        assert reason == "control_chars"
+
+    def test_bell_character_rejected(self):
+        is_valid, reason = validate_username("user\x07name@example.edu")
+        assert is_valid is False
+        assert reason == "control_chars"
+
+    def test_empty_username(self):
+        # Empty is technically valid (no control chars, not too long)
+        # but the worker already checks for missing username before validate
+        is_valid, reason = validate_username("")
+        assert is_valid is True
+        assert reason == ""

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, Response
 from app.config import get_settings
 from app.metrics import EVENTS_QUEUED, EVENTS_RECEIVED, EVENTS_REJECTED
 from app.redis_client import get_redis
+from app.utils import sanitize_username
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -83,11 +84,11 @@ async def receive_webhook(request: Request) -> Response:
             EVENTS_REJECTED.labels(reason="no_username").inc()
             continue
         if not ip:
-            logger.debug("Skipping event: no IP for user=%s", username)
+            logger.debug("Skipping event: no IP for user=%s", sanitize_username(username))
             EVENTS_REJECTED.labels(reason="no_ip").inc()
             continue
         if not is_valid_ip(ip):
-            logger.debug("Skipping event: invalid IP=%s for user=%s", ip, username)
+            logger.debug("Skipping event: invalid IP=%s for user=%s", ip, sanitize_username(username))
             EVENTS_REJECTED.labels(reason="invalid_ip").inc()
             continue
 
@@ -95,7 +96,7 @@ async def receive_webhook(request: Request) -> Response:
         await r.lpush(QUEUE_KEY, json.dumps(event))
         queued += 1
         EVENTS_QUEUED.inc()
-        logger.debug("Queued: user=%s ip=%s topic=%s", username, ip, topic)
+        logger.debug("Queued: user=%s ip=%s topic=%s", sanitize_username(username), ip, topic)
 
     logger.debug("Queued %d/%d events from %s", queued, len(events), topic)
     return Response(

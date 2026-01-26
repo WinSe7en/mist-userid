@@ -134,6 +134,33 @@ class TestSendToTarget:
         assert result is False
         assert client.post.call_count == 3  # initial + 2 retries
 
+    @pytest.mark.asyncio
+    async def test_delete_mapping_failed_is_benign(self):
+        """Logout for non-existent user should be treated as success."""
+        # This is the actual response format from PA when logout fails
+        # because the user wasn't in the table (mapping timed out or never existed)
+        mock_resp = httpx.Response(
+            200,
+            text='''<response status="error"><msg><line><uid-response>
+  <version>2.0</version>
+  <payload>
+    <login>
+    </login>
+    <logout>
+      <entry name="user@example.edu" ip="10.1.1.1" message="Delete mapping failed"/>
+    </logout>
+  </payload>
+</uid-response></line></msg></response>''',
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(return_value=mock_resp)
+
+        result = await send_to_target(
+            client, "https://pa.example.com", "<xml/>", "key", max_retries=3
+        )
+        assert result is True  # Should be treated as success
+        client.post.assert_called_once()  # No retries needed
+
 
 class TestSendBatch:
     @pytest.mark.asyncio

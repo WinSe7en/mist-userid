@@ -14,11 +14,13 @@ from app.metrics import (
     BATCH_FLUSHES,
     BATCH_SIZE,
     EVENTS_DEDUPED,
+    EVENTS_INVALID_USERNAME,
     EVENTS_PROCESSED,
     QUEUE_DEPTH,
 )
 from app.paloalto import send_batch
 from app.redis_client import close_redis, get_redis
+from app.utils import sanitize_username
 from app.webhook import QUEUE_KEY
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,28 @@ def classify_event(event: dict) -> str:
     if next_ap != "000000000000":
         return "login"
     return "logout"
+
+
+# Maximum username length for PA XML (conservative limit)
+MAX_USERNAME_LENGTH = 255
+
+
+def validate_username(username: str) -> tuple[bool, str]:
+    """Validate username before XML construction.
+
+    Returns:
+        (is_valid, reason) - reason is empty string if valid
+    """
+    if len(username) > MAX_USERNAME_LENGTH:
+        return False, "too_long"
+    # Reject control characters (ASCII 0-31) and null bytes
+    for char in username:
+        if ord(char) < 32:
+            return False, "control_chars"
+    # Reject XML-unsafe characters that could break attribute parsing
+    if "\x00" in username:
+        return False, "null_byte"
+    return True, ""
 
 
 async def run_worker() -> None:
@@ -95,17 +119,27 @@ async def run_worker() -> None:
                     logger.debug("Skipping event from queue: missing username or IP")
                     continue
 
+                # Validate username before XML construction
+                is_valid, reason = validate_username(username)
+                if not is_valid:
+                    logger.warning(
+                        "Skipping event: invalid username (reason=%s, len=%d)",
+                        reason, len(username),
+                    )
+                    EVENTS_INVALID_USERNAME.labels(reason=reason).inc()
+                    continue
+
                 key = (username, ip)
 
                 if await is_duplicate(username, ip):
-                    logger.debug("Dedup skip: user=%s ip=%s", username, ip)
+                    logger.debug("Dedup skip: user=%s ip=%s", sanitize_username(username), ip)
                     EVENTS_DEDUPED.inc()
                     continue
 
                 action = classify_event(event)
                 logger.debug(
                     "Event: user=%s ip=%s action=%s topic=%s next_ap=%s",
-                    username, ip, action,
+                    sanitize_username(username), ip, action,
                     event.get("_topic"), event.get("next_ap", "N/A"),
                 )
                 EVENTS_PROCESSED.labels(action=action).inc()
@@ -113,7 +147,7 @@ async def run_worker() -> None:
                 if action == "login":
                     batch_logins[key] = (username, ip)
                     if key in batch_logouts:
-                        logger.debug("Login supersedes logout: user=%s ip=%s", username, ip)
+                        logger.debug("Login supersedes logout: user=%s ip=%s", sanitize_username(username), ip)
                         batch_logouts.pop(key, None)
                 else:
                     if key not in batch_logins:
@@ -121,7 +155,7 @@ async def run_worker() -> None:
                     else:
                         logger.debug(
                             "Logout ignored (login already in batch): user=%s ip=%s",
-                            username, ip,
+                            sanitize_username(username), ip,
                         )
 
             total = len(batch_logins) + len(batch_logouts)

@@ -15,6 +15,10 @@ EVENTS_REJECTED = Counter(
 EVENTS_DEDUPED = Counter(
     "mist_userid_events_deduped_total", "Events skipped by dedup"
 )
+EVENTS_INVALID_USERNAME = Counter(
+    "mist_userid_events_invalid_username_total", "Events with invalid usernames",
+    ["reason"],
+)
 EVENTS_PROCESSED = Counter(
     "mist_userid_events_processed_total", "Events processed", ["action"]
 )
