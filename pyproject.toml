@@ -1,0 +1,89 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mist-userid"
+version = "0.2.0"
+description = "High-throughput webhook receiver for Juniper Mist to Palo Alto User-ID integration"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Matt Johnson" },
+]
+keywords = [
+    "mist",
+    "juniper",
+    "palo-alto",
+    "user-id",
+    "webhook",
+    "firewall",
+    "network",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: No Input/Output (Daemon)",
+    "Framework :: FastAPI",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Networking :: Firewalls",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "httpx>=0.25.0",
+    "redis[hiredis]>=5.0.0",
+    "pydantic-settings>=2.1.0",
+    "sdnotify>=0.3.2",
+    "prometheus-client>=0.20.0",
+    "python-json-logger>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "fakeredis>=2.20.0",
+    "locust>=2.20.0",
+]
+
+[project.scripts]
+mist-userid-worker = "app.worker:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/mist-userid"
+Documentation = "https://github.com/yourusername/mist-userid#readme"
+Repository = "https://github.com/yourusername/mist-userid.git"
+Issues = "https://github.com/yourusername/mist-userid/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+]
