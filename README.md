@@ -213,6 +213,81 @@ Both services:
 | `GET /ready` | Readiness — Redis + PA targets reachable | `{"status": "ready", "targets": {...}}` |
 | `GET /metrics` | Prometheus metrics (text format) | Counters, histograms, gauges |
 
+## Monitoring
+
+The API service exposes metrics via the `/metrics` endpoint in Prometheus format. You can integrate with either Prometheus or Zabbix.
+
+### Available Metrics
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `mist_userid_events_received_total` | Counter | `topic` | Webhook events received (by topic) |
+| `mist_userid_events_queued_total` | Counter | - | Events added to Redis queue |
+| `mist_userid_events_rejected_total` | Counter | `reason` | Rejected events (no_username, no_ip, ignored_ssid) |
+| `mist_userid_events_deduped_total` | Counter | - | Duplicate events skipped by cache |
+| `mist_userid_dlq_events_total` | Counter | - | Events moved to dead-letter queue |
+| `mist_userid_queue_depth` | Gauge | - | Current Redis queue size |
+
+### Prometheus
+
+Add this scrape config to `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'mist-userid'
+    static_configs:
+      - targets: ['your-server:8000']
+    metrics_path: /metrics
+    scrape_interval: 30s
+```
+
+### Zabbix
+
+A Zabbix template and UserParameter config are provided for Zabbix 6.0+.
+
+**Install UserParameters on the monitored host:**
+
+```bash
+sudo make zabbix
+```
+
+This copies the config to `/etc/zabbix/zabbix_agentd.d/` (or `zabbix_agent2.d/`) and restarts the agent.
+
+**Import the template into Zabbix:**
+
+1. Go to **Configuration > Templates > Import**
+2. Select `deploy/zabbix/mist-userid-template.yaml`
+3. Link the template to your host
+
+**Included in the template:**
+
+| Category | Items |
+|----------|-------|
+| Health | API health, Worker health |
+| Queues | Queue depth, DLQ depth, Dedup cache size |
+| Events | Received, queued, rejected, deduped (totals + rates) |
+| Memory | API service memory, Worker service memory |
+
+**Triggers:**
+
+| Trigger | Severity |
+|---------|----------|
+| API is down | High |
+| Worker is down | High |
+| Queue depth > 100 | Warning |
+| Queue depth > 500 | High |
+| DLQ has failed events | Warning |
+| API memory > 450MB | Warning |
+| Worker memory > 220MB | Warning |
+| No events for 10 minutes | Info |
+
+**Graphs:**
+
+- Event Throughput (received vs processed rate)
+- Queue Depth (main queue vs DLQ)
+- Memory Usage (API vs Worker)
+- Event Totals (received, processed, deduped, rejected)
+
 ## Logging
 
 ### Changing the Log Level

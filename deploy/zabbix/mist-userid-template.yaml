@@ -1,0 +1,402 @@
+zabbix_export:
+  version: '6.0'
+  date: '2026-01-26T12:00:00Z'
+  groups:
+    - uuid: a571c0d144b14fd4a87a9d9b2aa9fcd6
+      name: 'Templates/Applications'
+  templates:
+    - uuid: b682d1e255c25fe5b98b0e0c3bb0gde7
+      template: 'Mist User-ID'
+      name: 'Mist User-ID'
+      description: |
+        Monitor Juniper Mist to Palo Alto User-ID integration service.
+
+        Requires UserParameter config: /etc/zabbix/zabbix_agentd.d/mist-userid.conf
+
+        GitHub: https://github.com/WinSe7en/mist-userid
+      groups:
+        - name: 'Templates/Applications'
+      items:
+        # =====================================================================
+        # Health Checks
+        # =====================================================================
+        - uuid: c793e2f366d36gf6c09c1f1d4cc1hef8
+          name: 'API Health'
+          key: mist.userid.api.health
+          delay: '30s'
+          history: 7d
+          trends: 90d
+          valuemap:
+            name: 'Service state'
+          tags:
+            - tag: component
+              value: api
+            - tag: type
+              value: health
+
+        - uuid: d804f3g477e47hg7d10d2g2e5dd2ifg9
+          name: 'Worker Health'
+          key: mist.userid.worker.health
+          delay: '30s'
+          history: 7d
+          trends: 90d
+          valuemap:
+            name: 'Service state'
+          tags:
+            - tag: component
+              value: worker
+            - tag: type
+              value: health
+
+        # =====================================================================
+        # Queue Metrics (Redis)
+        # =====================================================================
+        - uuid: e915g4h588f58ih8e21e3h3f6ee3jgh0
+          name: 'Queue Depth'
+          key: mist.userid.queue.depth
+          delay: '30s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Number of events waiting in Redis queue'
+          tags:
+            - tag: component
+              value: queue
+            - tag: type
+              value: gauge
+
+        - uuid: f026h5i699g69ji9f32f4i4g7ff4khi1
+          name: 'Dead Letter Queue Depth'
+          key: mist.userid.dlq.depth
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Failed batches requiring manual attention'
+          tags:
+            - tag: component
+              value: queue
+            - tag: type
+              value: gauge
+
+        - uuid: g137i6j700h70kj0g43g5j5h8gg5lij2
+          name: 'Dedup Cache Keys'
+          key: mist.userid.dedup.keys
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: keys
+          description: 'Active deduplication entries (user+IP pairs)'
+          tags:
+            - tag: component
+              value: cache
+            - tag: type
+              value: gauge
+
+        # =====================================================================
+        # Event Counters
+        # =====================================================================
+        - uuid: h248j7k811i81lk1h54h6k6i9hh6mjk3
+          name: 'Events Received Total'
+          key: mist.userid.events.received
+          delay: '30s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Total webhook events received by API'
+          tags:
+            - tag: component
+              value: events
+            - tag: type
+              value: counter
+
+        - uuid: i359k8l922j92ml2i65i7l7j0ii7nkl4
+          name: 'Events Queued Total'
+          key: mist.userid.events.queued
+          delay: '30s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Total events added to processing queue'
+          tags:
+            - tag: component
+              value: events
+            - tag: type
+              value: counter
+
+        - uuid: k571m0n144l14on4k87k9n9l2kk9pmn6
+          name: 'Events Rejected Total'
+          key: mist.userid.events.rejected
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Events rejected (no username, no IP, ignored SSID)'
+          tags:
+            - tag: component
+              value: events
+            - tag: type
+              value: counter
+
+        - uuid: l682n1o255m25po5l98l0o0m3ll0qno7
+          name: 'Events Deduped Total'
+          key: mist.userid.events.deduped
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Duplicate events skipped by dedup cache'
+          tags:
+            - tag: component
+              value: events
+            - tag: type
+              value: counter
+
+        - uuid: m793o2p366n36qp6m09m1p1n4mm1rop8
+          name: 'DLQ Events Total'
+          key: mist.userid.dlq.total
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: events
+          description: 'Events moved to dead letter queue after retry exhaustion'
+          tags:
+            - tag: component
+              value: dlq
+            - tag: type
+              value: counter
+
+        # =====================================================================
+        # Memory Usage
+        # =====================================================================
+        - uuid: q137s6t700r70ut0q43q5t5r8qq5vst2
+          name: 'API Service Memory'
+          key: mist.userid.api.memory
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: B
+          description: 'Memory used by API service'
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - '300'
+          tags:
+            - tag: component
+              value: api
+            - tag: type
+              value: memory
+
+        - uuid: r248t7u811s81vu1r54r6u6s9rr6wtu3
+          name: 'Worker Service Memory'
+          key: mist.userid.worker.memory
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: B
+          description: 'Memory used by worker service'
+          preprocessing:
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - '300'
+          tags:
+            - tag: component
+              value: worker
+            - tag: type
+              value: memory
+
+        # =====================================================================
+        # Calculated Items (Rates)
+        # =====================================================================
+        - uuid: s359u8v922t92wv2s65s7v7t0ss7xvu4
+          name: 'Events Received Rate'
+          type: CALCULATED
+          key: mist.userid.events.received.rate
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: eps
+          params: 'change(//mist.userid.events.received)/30'
+          description: 'Events per second (received)'
+          tags:
+            - tag: component
+              value: events
+            - tag: type
+              value: rate
+
+        - uuid: t460v9w033u03xw3t76t8w8u1tt8yvw5
+          name: 'Events Queued Rate'
+          type: CALCULATED
+          key: mist.userid.events.queued.rate
+          delay: '60s'
+          history: 7d
+          trends: 90d
+          units: eps
+          params: 'change(//mist.userid.events.queued)/30'
+          description: 'Events per second (queued for processing)'
+          tags:
+            - tag: component
+              value: events
+            - tag: type
+              value: rate
+
+      # =======================================================================
+      # Triggers
+      # =======================================================================
+      triggers:
+        - uuid: u571w0x144v14yx4u87u9x9v2uu9zwx6
+          expression: 'last(/Mist User-ID/mist.userid.api.health)=0'
+          name: 'Mist User-ID API is down'
+          priority: HIGH
+          description: 'The mist-userid-api service is not responding to health checks'
+          tags:
+            - tag: scope
+              value: availability
+
+        - uuid: v682x1y255w25zy5v98v0y0w3vv0axy7
+          expression: 'last(/Mist User-ID/mist.userid.worker.health)=0'
+          name: 'Mist User-ID Worker is down'
+          priority: HIGH
+          description: 'The mist-userid-worker systemd service is not running'
+          tags:
+            - tag: scope
+              value: availability
+
+        - uuid: w793y2z366x36az6w09w1z1x4ww1byz8
+          expression: 'last(/Mist User-ID/mist.userid.queue.depth)>100'
+          name: 'Queue depth is high ({ITEM.VALUE} events)'
+          priority: WARNING
+          description: 'Events are backing up in the queue. Worker may be slow or PA targets unreachable.'
+          dependencies:
+            - name: 'Mist User-ID Worker is down'
+              expression: 'last(/Mist User-ID/mist.userid.worker.health)=0'
+          tags:
+            - tag: scope
+              value: performance
+
+        - uuid: x804z3a477y47ba7x10x2a2y5xx2cza9
+          expression: 'last(/Mist User-ID/mist.userid.queue.depth)>500'
+          name: 'Queue depth is critical ({ITEM.VALUE} events)'
+          priority: HIGH
+          description: 'Severe backlog in queue. Immediate attention required.'
+          dependencies:
+            - name: 'Queue depth is high ({ITEM.VALUE} events)'
+              expression: 'last(/Mist User-ID/mist.userid.queue.depth)>100'
+          tags:
+            - tag: scope
+              value: performance
+
+        - uuid: y915a4b588z58cb8y21y3b3z6yy3dab0
+          expression: 'last(/Mist User-ID/mist.userid.dlq.depth)>0'
+          name: 'Dead letter queue has failed events ({ITEM.VALUE})'
+          priority: WARNING
+          description: 'Some batches failed after all retries. Check PA connectivity and credentials.'
+          manual_close: 'YES'
+          tags:
+            - tag: scope
+              value: reliability
+
+        - uuid: a137c6d700b70ed0a43a5d5b8aa5fcd2
+          expression: 'last(/Mist User-ID/mist.userid.api.memory)>450000000'
+          name: 'API memory usage high ({ITEM.VALUE})'
+          priority: WARNING
+          description: 'API service approaching 512MB memory limit (MemoryMax in systemd)'
+          tags:
+            - tag: scope
+              value: capacity
+
+        - uuid: b248d7e811c81fe1b54b6e6c9bb6gde3
+          expression: 'last(/Mist User-ID/mist.userid.worker.memory)>220000000'
+          name: 'Worker memory usage high ({ITEM.VALUE})'
+          priority: WARNING
+          description: 'Worker service approaching 256MB memory limit (MemoryMax in systemd)'
+          tags:
+            - tag: scope
+              value: capacity
+
+        - uuid: c359e8f922d92gf2c65c7f7d0cc7hef4
+          expression: 'nodata(/Mist User-ID/mist.userid.events.received,600)=1 and last(/Mist User-ID/mist.userid.api.health)=1'
+          name: 'No events received for 10 minutes'
+          priority: INFO
+          description: 'API is up but no webhook events received. Could be normal during quiet periods or indicates webhook misconfiguration.'
+          tags:
+            - tag: scope
+              value: notice
+
+      # =======================================================================
+      # Graphs
+      # =======================================================================
+      graphs:
+        - uuid: d460f9g033e03hg3d76d8g8e1dd8ifg5
+          name: 'Event Throughput'
+          graph_items:
+            - color: 1A7C11
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.events.received.rate
+            - color: 2774A4
+              sortorder: '1'
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.events.queued.rate
+
+        - uuid: e571g0h144f14ih4e87e9h9f2ee9jgh6
+          name: 'Queue Depth'
+          graph_items:
+            - color: F63100
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.queue.depth
+            - color: FF7E00
+              sortorder: '1'
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.dlq.depth
+
+        - uuid: f682h1i255g25ji5f98f0i0g3ff0khi7
+          name: 'Memory Usage'
+          graph_items:
+            - color: 2774A4
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.api.memory
+            - color: 1A7C11
+              sortorder: '1'
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.worker.memory
+
+        - uuid: g793i2j366h36kj6g09g1j1h4gg1lij8
+          name: 'Event Totals'
+          graph_items:
+            - color: 1A7C11
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.events.received
+            - color: 2774A4
+              sortorder: '1'
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.events.queued
+            - color: F7941D
+              sortorder: '2'
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.events.deduped
+            - color: F63100
+              sortorder: '3'
+              item:
+                host: 'Mist User-ID'
+                key: mist.userid.events.rejected
+
+      # =======================================================================
+      # Value Maps
+      # =======================================================================
+      valuemaps:
+        - uuid: h804j3k477i47lk7h10h2k2i5hh2mij9
+          name: 'Service state'
+          mappings:
+            - value: '0'
+              newvalue: Down
+            - value: '1'
+              newvalue: Up

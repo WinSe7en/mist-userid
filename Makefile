@@ -4,22 +4,23 @@ VENV := $(INSTALL_DIR)/venv
 PYTHON := $(VENV)/bin/python
 SERVICE_DIR := /etc/systemd/system
 
-.PHONY: install update configure selinux firewall deploy test status start stop restart logs clean
+.PHONY: install update configure selinux firewall deploy zabbix test status start stop restart logs clean
 
 install:
 	mkdir -p $(INSTALL_DIR)
-	cp -r app requirements.txt $(INSTALL_DIR)/
+	cp -r app $(INSTALL_DIR)/
 	python3 -m venv $(VENV)
 	$(VENV)/bin/python -m ensurepip
 	$(VENV)/bin/pip install --upgrade pip
-	$(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements.txt
+	$(VENV)/bin/pip install -r requirements.txt
 	$(VENV)/bin/pip uninstall pip setuptools -y
 	rm -rf $(VENV)/bin/pip*
 
 update:
+	cp -r app $(INSTALL_DIR)/
 	$(VENV)/bin/python -m ensurepip
 	$(VENV)/bin/pip install --upgrade pip
-	$(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements.txt --upgrade
+	$(VENV)/bin/pip install -r requirements.txt --upgrade
 	$(VENV)/bin/pip uninstall pip setuptools -y
 	rm -rf $(VENV)/bin/pip*
 
@@ -60,9 +61,23 @@ deploy: install configure selinux firewall
 	systemctl restart mist-userid-api mist-userid-worker
 	@echo "Services deployed and started"
 
+zabbix:
+	@if [ -d /etc/zabbix/zabbix_agentd.d ]; then \
+		cp deploy/zabbix/mist-userid.conf /etc/zabbix/zabbix_agentd.d/; \
+		systemctl restart zabbix-agent; \
+		echo "Zabbix UserParameters installed. Import template from deploy/zabbix/mist-userid-template.yaml"; \
+	elif [ -d /etc/zabbix/zabbix_agent2.d ]; then \
+		cp deploy/zabbix/mist-userid.conf /etc/zabbix/zabbix_agent2.d/; \
+		systemctl restart zabbix-agent2; \
+		echo "Zabbix Agent 2 UserParameters installed. Import template from deploy/zabbix/mist-userid-template.yaml"; \
+	else \
+		echo "Error: Zabbix agent config directory not found"; \
+		exit 1; \
+	fi
+
 test:
 	$(VENV)/bin/python -m ensurepip
-	$(VENV)/bin/pip install -r $(INSTALL_DIR)/requirements-dev.txt
+	$(VENV)/bin/pip install -r requirements-dev.txt
 	$(VENV)/bin/python -m pytest -v
 	$(VENV)/bin/pip uninstall pip setuptools -y
 	rm -rf $(VENV)/bin/pip*
