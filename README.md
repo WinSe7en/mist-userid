@@ -130,12 +130,45 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 # Single firewall (dev/test)
 PA_TARGETS=https://pa-fw1.example.com
 
-# Multiple firewalls
+# Multiple firewalls (HA pair — redundant but resilient)
 PA_TARGETS=https://pa-fw1.example.com,https://pa-fw2.example.com
 
-# Panorama (production — redistributes to managed firewalls)
+# Panorama (recommended for multi-site)
 PA_TARGETS=https://panorama.example.com
 ```
+
+### Using Panorama
+
+For environments with multiple sites or many firewall pairs, Panorama is the recommended target. The User-ID XML API is identical — no code changes required, just point `PA_TARGETS` to Panorama.
+
+**Panorama configuration required:**
+
+1. **Enable User-ID Redistribution**:
+   - Navigate to `Panorama > Device Groups > [your-group] > Settings`
+   - Under `User Identification`, enable redistribution to member firewalls
+
+2. **Service account permissions**:
+   - The admin account needs XML API access on Panorama
+   - Role should include `User-ID Agent` permissions or equivalent
+
+3. **Device Group scope**:
+   - Mappings sent to Panorama are redistributed to all firewalls in the device group
+   - Ensure your target firewalls are in a device group with redistribution enabled
+
+**Benefits of Panorama:**
+- Single API call redistributes to all managed firewalls
+- Centralized User-ID management
+- Scales better than direct firewall connections
+- Survives individual firewall maintenance
+
+**HA pair vs. Panorama:**
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Single site, one HA pair | Direct to both firewalls (current setup) |
+| Single site, multiple pairs | Panorama |
+| Multi-site | Panorama |
+| No Panorama license | Direct to firewalls |
 
 ## systemd Service Management
 
