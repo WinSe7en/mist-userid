@@ -208,8 +208,8 @@ Each log line becomes a JSON object with `timestamp`, `level`, `logger`, and `me
 
 **DEBUG** (most verbose):
 ```
-Event: user=john.doe@example.edu ip=10.5.63.6 action=login topic=client-join next_ap=N/A
-Dedup skip: user=john.doe@example.edu ip=10.5.63.6
+Event: user=jsmith@example.edu ip=10.5.63.6 action=login topic=client-join next_ap=N/A
+Dedup skip: user=jsmith@example.edu ip=10.5.63.6
 Skipping event: ignored SSID=DU Guest WiFi
 Flushing batch: 3 logins, 1 logouts (trigger: timer)
 XML payload (245 bytes): <uid-message>...

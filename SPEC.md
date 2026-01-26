@@ -192,7 +192,7 @@ async def worker():
       "client_manufacture": "Apple",
       "client_model": "",
       "client_os": "18.7",
-      "client_username": "test.user@example.edu",
+      "client_username": "jsmith@example.edu",
       "connect": 1769117271,
       "connect_float": 1769117271,
       "disconnect": 1769117307,
@@ -257,7 +257,7 @@ When multiple events in the same webhook delivery share the same username+IP, **
   "client_ip": "10.6.139.58",
   "mac": "020000000c01",
   "next_ap": "020000000a01",
-  "psk_name": "test.user2@example.edu",
+  "psk_name": "psk-user@example.edu",
   "ssid": "Resident_Wireless",
   "termination_reason": 3,
   "timestamp": 1769117301
