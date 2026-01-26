@@ -68,6 +68,10 @@ zabbix:
 		echo "Zabbix UserParameters installed. Import template from deploy/zabbix/mist-userid-template.yaml"; \
 	elif [ -d /etc/zabbix/zabbix_agent2.d ]; then \
 		cp deploy/zabbix/mist-userid.conf /etc/zabbix/zabbix_agent2.d/; \
+		if ! grep -q "^Include=.*/zabbix_agent2.d/\*\.conf" /etc/zabbix/zabbix_agent2.conf 2>/dev/null; then \
+			echo "Include=/etc/zabbix/zabbix_agent2.d/*.conf" >> /etc/zabbix/zabbix_agent2.conf; \
+			echo "Added Include directive for UserParameters"; \
+		fi; \
 		systemctl restart zabbix-agent2; \
 		echo "Zabbix Agent 2 UserParameters installed. Import template from deploy/zabbix/mist-userid-template.yaml"; \
 	else \
