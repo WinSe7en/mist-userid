@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "mist-userid"
-version = "0.2.0"
+version = "0.2.1"
 description = "High-throughput webhook receiver for Juniper Mist to Palo Alto User-ID integration"
 readme = "README.md"
 license = "MIT"

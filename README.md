@@ -49,7 +49,7 @@ sudo make install
 
 # Configure (creates /etc/mist-userid/env from template)
 sudo make configure
-sudo vim /etc/mist-userid/env   # Set PA_TARGETS, PA_API_KEY, MIST_WEBHOOK_SECRET
+sudo vim /etc/mist-userid/env   # Set PA_TARGETS, credentials, MIST_WEBHOOK_SECRET
 
 # Deploy (installs systemd services and starts them)
 sudo make deploy
@@ -119,7 +119,7 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 | `BATCH_FLUSH_INTERVAL` | No | `2` | Seconds between batch flushes |
 | `DEDUP_TTL` | No | `300` | Dedup cache TTL in seconds |
 | `MAX_RETRY_ATTEMPTS` | No | `5` | PA API retry limit |
-| `USERID_TIMEOUT` | No | `60` | PA User-ID timeout in minutes |
+| `USERID_TIMEOUT` | No | `60` | PA User-ID timeout in minutes (align with DHCP lease) |
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
 | `LOG_FORMAT` | No | `text` | Log format: `text` or `json` |
 | `IGNORE_SSIDS` | No | *(empty)* | Comma-separated SSIDs to ignore (case-insensitive) |

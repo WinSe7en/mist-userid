@@ -5,19 +5,21 @@
 | Version | Supported          |
 | ------- | ------------------ |
 | 0.2.x   | :white_check_mark: |
-| < 0.2   | :x:                |
+| 0.1.x   | :x:                |
 
 ## Reporting a Vulnerability
 
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public GitHub issue for security vulnerabilities
-2. Email the maintainers directly or use GitHub's private vulnerability reporting
+2. Use [GitHub's private vulnerability reporting](https://github.com/WinSe7en/mist-userid/security/advisories/new) to submit your report
 3. Include:
    - Description of the vulnerability
    - Steps to reproduce
    - Potential impact
    - Suggested fix (if any)
+
+We will acknowledge receipt within 48 hours and provide a detailed response within 7 days.
 
 ## Security Considerations
 

@@ -18,7 +18,7 @@ Two systemd services: an API receiver (returns 202 immediately) and a separate w
 
 ## Tech Stack & Platform
 
-- Python 3.11+ on RHEL 9
+- Python 3.9+ on RHEL 9
 - FastAPI + uvicorn (async, multi-worker)
 - Redis (queue, dedup cache, rate limiting)
 - httpx (async HTTP client with connection pooling)
@@ -27,7 +27,7 @@ Two systemd services: an API receiver (returns 202 immediately) and a separate w
 
 ## Versioning
 
-- Semantic versioning, current: **0.1.0**
+- Semantic versioning, current: **0.2.1**
 - Version tracked in `app/__init__.py`
 - Git tags: `v0.1.0`, `v0.2.0`, etc.
 - Open source (MIT License)
@@ -76,6 +76,7 @@ make deploy                              # install systemd units + start
 - **Webhook topics**: `client-sessions` + `client-join` — uses `client_username` (or `psk_name` fallback) + `client_ip`; `client-join` always login, `client-sessions` uses `next_ap` for login vs. logout
 - **Logout on disconnect**: send `<logout>` when `next_ap == "000000000000"` (true disconnect); login wins over logout for same user+IP in a batch
 - **Multi-target PA support**: configurable list of PA firewall/Panorama targets (`PA_TARGETS` env var)
+- **PA API key auto-generation**: optionally provide `PA_USERNAME` + `PA_PASSWORD` instead of static `PA_API_KEY`; key is generated at startup via keygen API, cached in memory, and auto-refreshes on 401
 - **Retry with exponential backoff**: failed PA API batches retry up to 5 times (1s, 2s, 4s, 8s, 16s)
 - **Deduplication**: identical user+IP pairs within 5-min TTL are skipped
 - **Mist webhook signature validation**: HMAC-SHA256 via `X-Mist-Signature-v2` header; reject invalid (401)
