@@ -235,6 +235,95 @@ Max retries reached for https://pa-fw1.example.com (last status: 503)
 Failed to write to DLQ: ConnectionError
 ```
 
+## Dead-Letter Queue (DLQ)
+
+Batches that fail after all retry attempts are written to a Redis list (`userid_dlq`) for inspection and potential manual retry.
+
+### Inspecting the DLQ
+
+```bash
+# Count entries
+redis-cli LLEN userid_dlq
+
+# View recent failures
+redis-cli LRANGE userid_dlq 0 4
+
+# View failure timestamps (human-readable)
+redis-cli LRANGE userid_dlq 0 -1 | grep -oP '"timestamp": \K[0-9.]+' | \
+  xargs -I{} date -d @{} "+%Y-%m-%d %H:%M"
+```
+
+Each DLQ entry is JSON:
+```json
+{
+  "timestamp": 1769443310.81,
+  "targets": ["https://pa-fw1.example.com"],
+  "logins": [["user@example.edu", "10.5.1.1"]],
+  "logouts": [["user2@example.edu", "10.5.1.2"]],
+  "error": "All retries exhausted for targets: https://pa-fw1.example.com"
+}
+```
+
+### When to Retry
+
+- **Recent failures (< 5 minutes)**: Worth retrying — the user-IP mappings are still valid
+- **Stale failures (hours/days old)**: Usually not worth retrying — IPs may have been reassigned via DHCP, and logout targets may have already timed out on the PA
+
+### Manual Retry Script
+
+Save as `/opt/mist-userid/retry_dlq.py`:
+
+```python
+import asyncio, json, redis, httpx, os
+from xml.etree.ElementTree import Element, SubElement, tostring
+
+def build_xml(logins, logouts, timeout=60):
+    msg = Element("uid-message")
+    SubElement(msg, "type").text = "update"
+    payload = SubElement(msg, "payload")
+    if logins:
+        el = SubElement(payload, "login")
+        for user, ip in logins:
+            SubElement(el, "entry", name=user, ip=ip, timeout=str(timeout))
+    if logouts:
+        el = SubElement(payload, "logout")
+        for user, ip in logouts:
+            SubElement(el, "entry", name=user, ip=ip)
+    return tostring(msg, encoding="unicode")
+
+async def retry():
+    r = redis.Redis(decode_responses=True)
+    print(f"DLQ has {r.llen('userid_dlq')} entries")
+    ok = fail = 0
+    async with httpx.AsyncClient(timeout=30, verify=True) as c:
+        while (entry := r.rpop("userid_dlq")):
+            d = json.loads(entry)
+            xml = build_xml(d.get("logins",[]), d.get("logouts",[]))
+            for target in d["targets"]:
+                try:
+                    resp = await c.post(f"{target}/api/",
+                        data={"type":"user-id","key":os.environ["PA_API_KEY"],"cmd":xml})
+                    if "success" in resp.text: ok += 1
+                    else: fail += 1; print(f"✗ {target}: {resp.text[:80]}")
+                except Exception as e: fail += 1; print(f"✗ {target}: {e}")
+    print(f"Done: {ok} ok, {fail} failed")
+
+asyncio.run(retry())
+```
+
+Run with:
+```bash
+sudo bash -c 'export $(grep -v "^#" /etc/mist-userid/env | xargs) && \
+  /opt/mist-userid/venv/bin/python /opt/mist-userid/retry_dlq.py'
+```
+
+### Clearing the DLQ
+
+If entries are too stale to retry:
+```bash
+redis-cli DEL userid_dlq
+```
+
 ## Development
 
 ```bash
