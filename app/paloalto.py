@@ -81,6 +81,34 @@ async def send_to_target(
                     PA_REQUESTS.labels(target=target, status="success").inc()
                     return True
 
+                # PAN-OS returns HTTP 200 with XML status="unauth" on session
+                # timeout instead of HTTP 401 — treat as auth failure
+                if "status=\"unauth\"" in resp.text:
+                    logger.warning(
+                        "Session expired on %s (HTTP 200 but XML unauth): %s",
+                        target, resp.text[:200],
+                    )
+                    if allow_key_refresh:
+                        invalidate_api_key()
+                        try:
+                            new_key = await get_api_key(client)
+                            logger.info("Regenerated API key after session timeout, retrying %s", target)
+                            return await send_to_target(
+                                client, target, xml_body, new_key, max_retries,
+                                allow_key_refresh=False,
+                            )
+                        except Exception as e:
+                            logger.error("Failed to regenerate API key: %s", e)
+                            PA_REQUESTS.labels(target=target, status="failure").inc()
+                            return False
+                    else:
+                        logger.error(
+                            "Permanent auth failure from %s: session timeout (already refreshed key)",
+                            target,
+                        )
+                        PA_REQUESTS.labels(target=target, status="failure").inc()
+                        return False
+
             if resp.status_code == 401:
                 if allow_key_refresh:
                     logger.warning(

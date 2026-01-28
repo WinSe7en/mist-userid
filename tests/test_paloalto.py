@@ -187,6 +187,46 @@ class TestSendToTarget:
         client.post.assert_called_once()  # No retries needed
 
 
+    @pytest.mark.asyncio
+    async def test_xml_unauth_session_timeout_triggers_key_refresh(self):
+        """PAN-OS returns HTTP 200 with XML status='unauth' on session timeout.
+        Should trigger key refresh and retry, not dead-letter."""
+        unauth_resp = httpx.Response(
+            200,
+            text='<response status="unauth" code="22"><msg><line>Session timed out</line></msg></response>',
+        )
+        success_resp = httpx.Response(
+            200,
+            text='<response status="success"><result/></response>',
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        # First call: session timeout, second call (after refresh): success
+        client.post = AsyncMock(side_effect=[unauth_resp, success_resp])
+
+        result = await send_to_target(
+            client, "https://pa.example.com", "<xml/>", "key", max_retries=3
+        )
+        assert result is True
+        assert client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_xml_unauth_no_refresh_if_already_refreshed(self):
+        """If key was already refreshed and we still get unauth, fail permanently."""
+        unauth_resp = httpx.Response(
+            200,
+            text='<response status="unauth" code="22"><msg><line>Session timed out</line></msg></response>',
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(return_value=unauth_resp)
+
+        result = await send_to_target(
+            client, "https://pa.example.com", "<xml/>", "key", max_retries=3,
+            allow_key_refresh=False,
+        )
+        assert result is False
+        assert client.post.call_count == 1
+
+
 class TestSendBatch:
     @pytest.mark.asyncio
     async def test_empty_batch_noop(self):
