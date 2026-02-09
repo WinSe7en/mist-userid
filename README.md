@@ -560,6 +560,99 @@ sudo firewall-cmd --permanent --remove-port=8000/tcp
 sudo firewall-cmd --reload
 ```
 
+## Operations Quick Reference
+
+Day-to-day commands for managing the service without any external tools.
+
+### Health Check
+
+```bash
+# Service status
+sudo systemctl status mist-userid-api mist-userid-worker
+
+# Application health (is the API running?)
+curl -s http://localhost:8000/health
+
+# Readiness (Redis + PA targets reachable, API key valid?)
+curl -s http://localhost:8000/ready | python3 -m json.tool
+```
+
+### Queue & DLQ Inspection
+
+```bash
+# Check queue depth (should be 0 or near 0)
+redis-cli LLEN userid_queue
+
+# Check dead-letter queue (failed batches)
+redis-cli LLEN userid_dlq
+
+# View DLQ entries with timestamps and details
+redis-cli LRANGE userid_dlq 0 -1 | python3 -c "
+import sys, json
+from datetime import datetime
+for line in sys.stdin:
+    d = json.loads(line.strip())
+    dt = datetime.fromtimestamp(d['timestamp']).strftime('%a %b %d %H:%M')
+    logins = len(d.get('logins', []))
+    logouts = len(d.get('logouts', []))
+    targets = ', '.join(d.get('targets', []))
+    print(f'{dt}  {logins}L/{logouts}O  {targets}')
+"
+
+# Clear stale DLQ entries (entries older than a few minutes are not worth retrying)
+redis-cli DEL userid_dlq
+
+# Check active dedup cache entries
+redis-cli KEYS 'dedup:*' | wc -l
+```
+
+### Event Metrics
+
+```bash
+# View all metrics (Prometheus format)
+curl -s http://localhost:8000/metrics | grep "^mist_userid" | grep -v created
+
+# Quick summary
+curl -s http://localhost:8000/metrics | python3 -c "
+import sys
+for line in sys.stdin:
+    if line.startswith('mist_userid') and 'created' not in line:
+        parts = line.strip().split()
+        name = parts[0].replace('mist_userid_','').replace('_total','')
+        print(f'  {name:<40} {parts[1]}')
+"
+```
+
+### Service Memory
+
+```bash
+# Check memory usage (compare against MemoryMax in systemd unit)
+systemctl show mist-userid-api --property=MemoryCurrent --value    # max 512MB
+systemctl show mist-userid-worker --property=MemoryCurrent --value  # max 256MB
+```
+
+### Logs
+
+```bash
+# Follow both services live
+sudo journalctl -u mist-userid-api -u mist-userid-worker -f
+
+# Check for errors in the last 24 hours
+sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -iE "ERROR|WARNING"
+
+# Check for PA auth issues specifically
+sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -i "unauth\|session\|401\|403"
+```
+
+### PA Firewall Verification
+
+```bash
+# On the PA firewall CLI, verify User-ID mappings are landing
+show user ip-user-mapping all
+show user ip-user-mapping all | match jsmith
+show user ip-user-mapping all | match 10.5.
+```
+
 ### Memory usage growing
 - Check `systemctl status mist-userid-worker` for memory stats
 - The systemd `MemoryMax` will kill and restart the process if it exceeds limits
