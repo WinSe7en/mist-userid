@@ -658,6 +658,72 @@ show user ip-user-mapping all | match 10.5.
 - The systemd `MemoryMax` will kill and restart the process if it exceeds limits
 - Normal memory usage should be well under 100M
 
+## Future: Wired NAC (Certificate Auth)
+
+Add User-ID mappings for wired users authenticating via Mist Access Assurance with user certificates (EAP-TLS).
+
+### Prerequisites (Mist side)
+
+1. **Create a NAC policy rule** in Mist Access Assurance that matches certificate-based authentication and assigns the correct VLAN. Without this rule, all cert auth attempts hit the implicit deny. As of Feb 2026, `minis-radius-user` test attempts are being denied with:
+   ```
+   "No policy rules are hit, rejected by implicit deny"
+   ```
+2. **Webhook topics**: Enable `nac-accounting` and `nac-events` on the Mist webhook (already done)
+3. **Test user**: Have a user authenticate via EAP-TLS with a user certificate and capture the resulting webhook payload
+
+### What We Know So Far
+
+**Webhook topics:**
+
+| Topic | Volume | Purpose | Has `client_ip` |
+|-------|--------|---------|-----------------|
+| `nac-accounting` | ~35/min | Session lifecycle (START/UPDATE/STOP) | Sometimes |
+| `nac-events` | ~1/min | Auth decisions (PERMIT/DENY) | No |
+
+**Payload fields observed (MAB only so far):**
+
+```json
+{
+  "auth_type": "mab",
+  "type": "NAC_ACCOUNTING_UPDATE",
+  "username": "020000000c06",
+  "client_ip": "198.51.100.216",
+  "mac": "020000000c06",
+  "port_id": "mge-1/0/5",
+  "nas_ip": "10.1.46.202",
+  "device_mac": "020000000c05"
+}
+```
+
+### What We Need to Determine
+
+Once a user successfully authenticates with a certificate, capture the payload and verify:
+
+1. **`auth_type` value** — expected to be `eap-tls` or `dot1x` (not `mab`)
+2. **Username field** — does `username` contain the cert identity (UPN/email from SAN), or is it in a different field like `idp_username` or `cert_cn`?
+3. **`client_ip` populated?** — wired clients get IP via DHCP after auth; may only appear in `nac-accounting` UPDATE events after the initial START
+4. **Login/logout mapping** — `NAC_ACCOUNTING_START` = login, `NAC_ACCOUNTING_STOP` = logout
+
+### Expected Code Changes
+
+Assuming the payload carries a real username and IP:
+
+- **`app/webhook.py`**: Add `nac-accounting` to `VALID_TOPICS`, extract username from the cert-specific field, filter on `auth_type != "mab"` to skip device MAB events
+- **`app/worker.py`**: Map `NAC_ACCOUNTING_START` → login, `NAC_ACCOUNTING_STOP` → logout (similar to `client-sessions` with `next_ap`)
+- **Filtering**: Skip events where `username` is a MAC address (MAB devices like phones, printers)
+
+### Wired IP Ranges
+
+Wired clients use the `198.51.100.x.x` range, distinct from wireless (`10.5.x.x`, `10.7.x.x`). Verify on the PA:
+
+```bash
+# Wireless mappings (existing)
+show user ip-user-mapping all | match 10.5.
+
+# Wired mappings (new — once implemented)
+show user ip-user-mapping all | match 198.51.100.
+```
+
 ## Future: High Availability (F5)
 
 Production plan: two instances behind an F5 load balancer for zero-downtime patching.
