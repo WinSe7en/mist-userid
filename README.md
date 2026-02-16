@@ -564,55 +564,44 @@ sudo firewall-cmd --reload
 
 Day-to-day commands for managing the service without any external tools.
 
-### Health Check
+### Full Health Check
+
+Run all of these to get a complete picture of service health:
 
 ```bash
-# Service status
-sudo systemctl status mist-userid-api mist-userid-worker
+# 1. Service status (are both processes running?)
+sudo systemctl status mist-userid-api --no-pager
+sudo systemctl status mist-userid-worker --no-pager
 
-# Application health (is the API running?)
+# 2. Application health (is the API running? version?)
 curl -s http://localhost:8000/health
 
-# Readiness (Redis + PA targets reachable, API key valid?)
+# 3. Readiness (Redis + PA targets reachable, API key valid?)
 curl -s http://localhost:8000/ready | python3 -m json.tool
-```
 
-### Queue & DLQ Inspection
-
-```bash
-# Check queue depth (should be 0 or near 0)
+# 4. Queue depth (should be 0 or near 0; >100 means worker is behind)
 redis-cli LLEN userid_queue
 
-# Check dead-letter queue (failed batches)
+# 5. Dead-letter queue (should be 0; >0 means failed batches need attention)
 redis-cli LLEN userid_dlq
 
-# View DLQ entries with timestamps and details
-redis-cli LRANGE userid_dlq 0 -1 | python3 -c "
-import sys, json
-from datetime import datetime
-for line in sys.stdin:
-    d = json.loads(line.strip())
-    dt = datetime.fromtimestamp(d['timestamp']).strftime('%a %b %d %H:%M')
-    logins = len(d.get('logins', []))
-    logouts = len(d.get('logouts', []))
-    targets = ', '.join(d.get('targets', []))
-    print(f'{dt}  {logins}L/{logouts}O  {targets}')
-"
+# 6. Memory usage (compare against limits: API 512MB, Worker 256MB)
+systemctl show mist-userid-api --property=MemoryCurrent --value
+systemctl show mist-userid-worker --property=MemoryCurrent --value
 
-# Clear stale DLQ entries (entries older than a few minutes are not worth retrying)
-redis-cli DEL userid_dlq
-
-# Check active dedup cache entries
-redis-cli KEYS 'dedup:*' | wc -l
+# 7. Recent errors (check for anything unexpected)
+sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -iE "ERROR|WARNING" | tail -20
 ```
 
 ### Event Metrics
 
+The API service exposes Prometheus-format counters at `/metrics`. These are cumulative since the API was last restarted.
+
 ```bash
-# View all metrics (Prometheus format)
+# View all metrics
 curl -s http://localhost:8000/metrics | grep "^mist_userid" | grep -v created
 
-# Quick summary
+# Quick summary (human-readable)
 curl -s http://localhost:8000/metrics | python3 -c "
 import sys
 for line in sys.stdin:
@@ -623,12 +612,69 @@ for line in sys.stdin:
 "
 ```
 
-### Service Memory
+**What the metrics mean:**
+
+| Metric | What It Tells You |
+|--------|-------------------|
+| `events_received{topic=...}` | Total webhooks received per topic (client-join, client-sessions) |
+| `events_queued` | Events that passed filtering and were queued for the worker |
+| `events_rejected{reason=...}` | Events filtered out: `no_username`, `no_ip`, `ignored_ssid`, `invalid_ip` |
+| `events_deduped` | Duplicate user+IP pairs skipped (same mapping within 5min TTL) |
+| `dlq_events` | Batches that failed all retries and were dead-lettered |
+
+**Healthy system**: `received` >> `queued` (most events lack username/IP and are filtered), `dlq_events` = 0.
+
+### DLQ Inspection & Diagnosis
+
+The dead-letter queue (`userid_dlq`) stores batches that failed after all retries. Each entry is JSON with a timestamp, the affected targets, and the login/logout mappings.
 
 ```bash
-# Check memory usage (compare against MemoryMax in systemd unit)
-systemctl show mist-userid-api --property=MemoryCurrent --value    # max 512MB
-systemctl show mist-userid-worker --property=MemoryCurrent --value  # max 256MB
+# Count entries
+redis-cli LLEN userid_dlq
+
+# View entries with timestamps and summary
+redis-cli LRANGE userid_dlq 0 -1 | python3 -c "
+import sys, json
+from datetime import datetime
+for line in sys.stdin:
+    d = json.loads(line.strip())
+    dt = datetime.fromtimestamp(d['timestamp']).strftime('%a %b %d %H:%M')
+    logins = len(d.get('logins', []))
+    logouts = len(d.get('logouts', []))
+    targets = ', '.join(d.get('targets', []))
+    error = d.get('error', '')
+    print(f'{dt}  {logins}L/{logouts}O  {targets}')
+"
+
+# View a single entry in full detail (first entry)
+redis-cli LINDEX userid_dlq 0 | python3 -m json.tool
+
+# Check logs around a DLQ timestamp for the actual error
+# (replace the date/time with the DLQ entry timestamp)
+sudo journalctl -u mist-userid-worker --since "2026-02-16 07:15" --until "2026-02-16 07:18"
+```
+
+**Diagnosing DLQ entries:**
+
+| Log Error | Meaning | Action |
+|-----------|---------|--------|
+| `Commit-window 403` | PAN-OS was mid-commit (handled automatically since v0.2.1+) | Clear — service now retries these |
+| `Permanent auth failure: 403` | Service account lacks User-ID permissions | Check PA admin role has XML API + User-ID Agent |
+| `Permanent auth failure: 401` | API key invalid even after refresh | Check PA_USERNAME/PA_PASSWORD credentials |
+| `Session expired (XML unauth)` | PA session timed out (handled automatically) | Clear — service auto-refreshes the key |
+| `Max retries reached (status: 5xx)` | PA firewall temporarily unavailable | Check PA firewall health; entries may be stale |
+| `Connection refused` / `Timeout` | Network issue to PA target | Check connectivity, firewall rules, PA is up |
+
+**When to retry vs. clear:**
+- **< 5 minutes old**: Might be worth retrying (user+IP still valid)
+- **Hours/days old**: Clear them — IPs may have been reassigned via DHCP
+
+```bash
+# Clear all DLQ entries
+redis-cli DEL userid_dlq
+
+# Check active dedup cache entries
+redis-cli KEYS 'dedup:*' | wc -l
 ```
 
 ### Logs
@@ -641,7 +687,14 @@ sudo journalctl -u mist-userid-api -u mist-userid-worker -f
 sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -iE "ERROR|WARNING"
 
 # Check for PA auth issues specifically
-sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -i "unauth\|session\|401\|403"
+sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -i "unauth\|session\|401\|403\|commit-window"
+
+# See batch sends (how often and how large)
+sudo journalctl -u mist-userid-worker --since "1 hour ago" | grep "Sending batch"
+
+# Count errors vs successes in the last 24h
+sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -c "HTTP/1.1 200 OK"
+sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -c "ERROR"
 ```
 
 ### PA Firewall Verification
@@ -651,12 +704,101 @@ sudo journalctl -u mist-userid-worker --since "24 hours ago" | grep -i "unauth\|
 show user ip-user-mapping all
 show user ip-user-mapping all | match jsmith
 show user ip-user-mapping all | match 10.5.
+
+# Count total mappings
+show user ip-user-mapping all | match "Total:"
 ```
 
-### Memory usage growing
-- Check `systemctl status mist-userid-worker` for memory stats
-- The systemd `MemoryMax` will kill and restart the process if it exceeds limits
-- Normal memory usage should be well under 100M
+### Deploying Code Updates
+
+When code changes are made in the git repository:
+
+```bash
+# 1. Pull latest code
+cd /home/matt.johnson.03/projects/mist-userid
+git pull
+
+# 2. Run tests
+python3 -m pytest -v
+
+# 3. Copy updated files to production
+sudo cp app/*.py /opt/mist-userid/app/
+
+# 4. Restart affected service(s)
+# - Changed webhook.py or main.py? Restart API
+sudo systemctl restart mist-userid-api
+
+# - Changed paloalto.py, pa_auth.py, worker.py, dedup.py? Restart worker
+sudo systemctl restart mist-userid-worker
+
+# - Changed config.py or metrics.py? Restart both
+sudo systemctl restart mist-userid-api mist-userid-worker
+
+# 5. Verify
+curl -s http://localhost:8000/health
+curl -s http://localhost:8000/ready | python3 -m json.tool
+sudo systemctl status mist-userid-worker --no-pager | head -10
+```
+
+**Full redeploy** (new dependencies, systemd changes, etc.):
+
+```bash
+cd /home/matt.johnson.03/projects/mist-userid
+sudo make update    # copies app/ files and updates pip packages
+sudo make deploy    # full redeploy (systemd units, nginx, SELinux, firewall)
+```
+
+### Restarting After Config Changes
+
+```bash
+# Edit the env file
+sudo vim /etc/mist-userid/env
+
+# Restart both services to pick up changes
+sudo systemctl restart mist-userid-api mist-userid-worker
+
+# Verify
+curl -s http://localhost:8000/ready | python3 -m json.tool
+```
+
+### Memory Usage Growing
+- Check `systemctl status mist-userid-worker` for current memory
+- Normal usage: API ~100MB, Worker ~40-50MB
+- systemd `MemoryMax` kills and auto-restarts the process if limits are exceeded (API: 512MB, Worker: 256MB)
+- If memory grows steadily, check queue depth — a backlog can cause batch accumulation
+
+## PAN-OS API Behaviors
+
+The service handles several non-obvious PAN-OS API behaviors automatically. No operator action needed — these are documented here for troubleshooting context.
+
+### Session Timeout (HTTP 200 with XML `status="unauth"`)
+
+PAN-OS returns HTTP 200 (not 401) when the API session expires. The response body contains `status="unauth" code="22"` with "Session timed out". The service detects this, regenerates the API key via keygen, and retries the request automatically.
+
+**What you'd see in logs:**
+```
+WARNING: Session expired on https://pan03... (HTTP 200 but XML unauth)
+INFO: Regenerated API key after session timeout, retrying https://pan03...
+```
+
+### Commit-Window 403
+
+During PAN-OS auto-commits (or manual commits), the firewall temporarily returns HTTP 403 with "Type [user-id] not authorized for user role." This is transient — the user-id API role is briefly unavailable during the commit. The service retries with exponential backoff (1s, 2s, 4s...) until the commit completes.
+
+**What you'd see in logs:**
+```
+WARNING: Commit-window 403 from https://pan03..., retry 1/5 in 1s
+```
+
+If you see persistent 403 errors (not during commits), check that the service account has User-ID Agent / XML API permissions on the PA.
+
+### Benign Logout Failures ("Delete mapping failed")
+
+When the service sends a `<logout>` for a user whose mapping already expired (DHCP lease changed, PA timeout elapsed), PAN-OS returns `status="error"` with "Delete mapping failed." This is harmless — the mapping was already gone. The service treats this as success and does not retry or dead-letter.
+
+### API Key Auto-Refresh on 401
+
+If the PA returns HTTP 401, the service invalidates the cached API key, regenerates via keygen API, and retries with the new key. This handles password rotations and PA key invalidations without service restart.
 
 ## Future: Wired NAC (Certificate Auth)
 

@@ -44,7 +44,8 @@ Mist Webhooks → FastAPI (uvicorn workers) → Redis Queue → Worker Process �
 ## Palo Alto Integration Notes
 - Use XML API for User-ID updates: `/api/?type=user-id`
 - **Batch format** supports multiple `<login>` and `<logout>` entries per request
-- API key auth (store in env var or Vault)
+- API key auth: static `PA_API_KEY` or auto-generated from `PA_USERNAME`/`PA_PASSWORD` via keygen API
+- Key is generated once at startup, cached in memory, auto-refreshes on 401 or session timeout
 - Default User-ID timeout: 60 min (configurable via `USERID_TIMEOUT`)
 - **Configurable list of PA targets** (`PA_TARGETS` env var, comma-separated):
   - Dev/test: 1-2 individual firewalls
@@ -142,15 +143,20 @@ async def worker():
 - Retry failed PA API batches with **exponential backoff**
 - Max retry attempts: 5 (configurable via `MAX_RETRY_ATTEMPTS`)
 - Backoff intervals: 1s, 2s, 4s, 8s, 16s
-- After max retries: log error and drop the batch (next webhook cycle will re-establish the mapping)
-- **Transient failures** (timeouts, 5xx responses): retry with backoff
-- **Permanent failures** (401, 403): log immediately, do not retry (likely misconfigured API key)
+- After max retries: dead-letter the batch to Redis (`userid_dlq`) for inspection
+- **Transient failures** (timeouts, 5xx, commit-window 403): retry with backoff
+- **Auth failures** (401, XML `status="unauth"`): invalidate cached API key, regenerate via keygen API, retry once with new key
+- **Commit-window 403** ("not authorized for user role"): PAN-OS temporarily revokes API permissions during commits; treated as transient with retry
+- **Permanent failures** (genuine 403 permission errors): log immediately, do not retry
+- **Benign errors** (HTTP 200 with "Delete mapping failed"): logout for already-expired mapping; treated as success
 
 ## Configuration Variables
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PA_TARGETS` | Comma-separated list of PA firewall/Panorama URLs | *(required)* |
-| `PA_API_KEY` | API key for PA XML API | *(required)* |
+| `PA_API_KEY` | API key for PA XML API (required if username/password not set) | *(empty)* |
+| `PA_USERNAME` | PA admin username for API key auto-generation | *(empty)* |
+| `PA_PASSWORD` | PA admin password for API key auto-generation | *(empty)* |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
 | `MIST_WEBHOOK_SECRET` | Shared secret for webhook signature validation | *(required)* |
 | `BATCH_SIZE` | Max items per PA API batch | `50` |
@@ -159,6 +165,8 @@ async def worker():
 | `MAX_RETRY_ATTEMPTS` | PA API retry limit | `5` |
 | `USERID_TIMEOUT` | PA User-ID timeout in minutes | `60` |
 | `LOG_LEVEL` | Logging level | `INFO` |
+| `LOG_FORMAT` | Log format: `text` or `json` | `text` |
+| `IGNORE_SSIDS` | Comma-separated SSIDs to ignore (case-insensitive) | *(empty)* |
 
 ## Graceful Shutdown & Watchdog
 - Worker catches `SIGTERM` and flushes the current batch before exiting
@@ -420,8 +428,8 @@ WantedBy=multi-user.target
 - Mock Mist payloads captured from real events
 
 ## Versioning
-- Semantic versioning starting at **0.1.0**
-- Track in `app/__init__.py` (`__version__ = "0.1.0"`)
+- Semantic versioning, current: **0.2.1**
+- Track in `app/__init__.py` (`__version__ = "0.2.1"`)
 - Tag releases in git (`git tag v0.1.0`)
 - CHANGELOG.md to track notable changes per release
 
@@ -447,29 +455,40 @@ WantedBy=multi-user.target
 ## File Structure (Updated)
 ```
 ├── app/
-│   ├── __init__.py          # __version__ = "0.1.0"
+│   ├── __init__.py          # __version__ = "0.2.1"
 │   ├── main.py              # FastAPI app entry + health endpoints
 │   ├── webhook.py           # Webhook routes (POST /mist/webhook)
-│   ├── paloalto.py          # PA XML API client (async, batching, retry)
+│   ├── paloalto.py          # PA XML API client (async, batching, retry, DLQ)
+│   ├── pa_auth.py           # API key generation (keygen) and caching
 │   ├── worker.py            # Queue consumer / batch sender
 │   ├── redis_client.py      # Redis connection
 │   ├── dedup.py             # Deduplication logic
+│   ├── metrics.py           # Prometheus metrics definitions
+│   ├── utils.py             # Username sanitization, helpers
 │   └── config.py            # Settings via pydantic-settings
 ├── tests/
+│   ├── conftest.py          # Shared fixtures (fake_redis, etc.)
 │   ├── test_webhook.py      # Webhook endpoint tests
-│   ├── test_worker.py       # Worker logic tests
-│   ├── test_paloalto.py     # PA API client tests
+│   ├── test_worker.py       # Worker logic tests (classify, validate)
+│   ├── test_paloalto.py     # PA API client tests (retry, auth, DLQ)
+│   ├── test_pa_auth.py      # API key generation/caching tests
 │   ├── test_dedup.py        # Deduplication tests
-│   ├── conftest.py          # Shared fixtures
+│   ├── test_metrics.py      # Metrics endpoint tests
+│   ├── test_utils.py        # Username sanitization tests
 │   └── locustfile.py        # Load testing
 ├── deploy/
 │   ├── mist-userid-api.service
 │   ├── mist-userid-worker.service
-│   └── env.example          # Template for /etc/mist-userid/env
-├── Makefile                  # install, configure, deploy, test, status
+│   ├── nginx-mist-userid.conf
+│   ├── env.example          # Template for /etc/mist-userid/env
+│   └── zabbix/
+│       ├── mist-userid.conf           # Zabbix UserParameter definitions
+│       └── mist-userid-template.yaml  # Zabbix 6.0 importable template
+├── Makefile                  # install, update, configure, deploy, test, zabbix
 ├── requirements.txt
 ├── requirements-dev.txt      # pytest, locust, etc.
 ├── CHANGELOG.md
 ├── LICENSE                   # MIT
-└── README.md
+├── SPEC.md                   # Full technical specification
+└── README.md                 # User-facing documentation
 ```
