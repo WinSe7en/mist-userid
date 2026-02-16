@@ -135,6 +135,27 @@ async def send_to_target(
                     return False
 
             if resp.status_code == 403:
+                # PAN-OS returns 403 "not authorized for user role" during
+                # auto-commit windows — treat as transient and retry
+                if "not authorized for user role" in resp.text.lower():
+                    if attempt < max_retries:
+                        delay = 2**attempt
+                        logger.warning(
+                            "Commit-window 403 from %s, retry %d/%d in %ds: %s",
+                            target, attempt + 1, max_retries, delay,
+                            resp.text[:200],
+                        )
+                        PA_REQUESTS.labels(target=target, status="retry").inc()
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.error(
+                        "Max retries reached for %s (commit-window 403)",
+                        target,
+                    )
+                    PA_REQUESTS.labels(target=target, status="failure").inc()
+                    return False
+
+                # Genuine 403 — permanent failure, no retry
                 logger.error(
                     "Permanent auth failure from %s: %d", target, resp.status_code
                 )

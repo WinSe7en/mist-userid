@@ -100,7 +100,7 @@ class TestSendToTarget:
 
     @pytest.mark.asyncio
     async def test_403_permanent_failure_no_retry(self):
-        """403 is a permanent failure with no retry."""
+        """Genuine 403 is a permanent failure with no retry."""
         mock_resp = httpx.Response(403, text="Forbidden")
         client = AsyncMock(spec=httpx.AsyncClient)
         client.post = AsyncMock(return_value=mock_resp)
@@ -109,7 +109,48 @@ class TestSendToTarget:
             client, "https://pa.example.com", "<xml/>", "key", max_retries=3
         )
         assert result is False
-        assert client.post.call_count == 1  # no retries for 403
+        assert client.post.call_count == 1  # no retries for genuine 403
+
+    @pytest.mark.asyncio
+    async def test_403_commit_window_retries_then_succeeds(self):
+        """403 with 'not authorized for user role' is transient (commit window)."""
+        commit_403 = httpx.Response(
+            403,
+            text='<response status="error"><msg>'
+                 '<line>Type [user-id] not authorized for user role</line>'
+                 '</msg></response>',
+        )
+        success_resp = httpx.Response(
+            200, text='<response status="success"><result/></response>'
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(side_effect=[commit_403, success_resp])
+
+        with patch("app.paloalto.asyncio.sleep", new_callable=AsyncMock):
+            result = await send_to_target(
+                client, "https://pa.example.com", "<xml/>", "key", max_retries=3
+            )
+        assert result is True
+        assert client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_403_commit_window_max_retries_exhausted(self):
+        """Commit-window 403 exhausts retries if commit takes too long."""
+        commit_403 = httpx.Response(
+            403,
+            text='<response status="error"><msg>'
+                 '<line>Type [user-id] not authorized for user role</line>'
+                 '</msg></response>',
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(return_value=commit_403)
+
+        with patch("app.paloalto.asyncio.sleep", new_callable=AsyncMock):
+            result = await send_to_target(
+                client, "https://pa.example.com", "<xml/>", "key", max_retries=2
+            )
+        assert result is False
+        assert client.post.call_count == 3  # initial + 2 retries
 
     @pytest.mark.asyncio
     async def test_transient_failure_retries(self):
