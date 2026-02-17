@@ -268,6 +268,7 @@ async def _dead_letter(
     try:
         r = await get_redis()
         await r.lpush(DLQ_KEY, entry)
+        await r.ltrim(DLQ_KEY, 0, 999)  # Cap DLQ at 1000 entries
         DLQ_EVENTS.inc()
         logger.warning(
             "Dead-lettered batch (%d logins, %d logouts) for targets: %s",

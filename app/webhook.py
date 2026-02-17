@@ -3,12 +3,13 @@ import hmac
 import ipaddress
 import json
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Request, Response
 
 from app.config import get_settings
-from app.metrics import EVENTS_QUEUED, EVENTS_RECEIVED, EVENTS_REJECTED
+from app.metrics import EVENTS_QUEUED, EVENTS_RECEIVED, EVENTS_REJECTED, WEBHOOK_QUEUE_FULL
 from app.redis_client import get_redis
 from app.utils import sanitize_username
 
@@ -31,9 +32,20 @@ def is_valid_ip(ip: str) -> bool:
         addr = ipaddress.ip_address(ip)
     except ValueError:
         return False
-    if addr.is_link_local or addr == ipaddress.ip_address("0.0.0.0"):
+    if addr.is_link_local or addr.is_unspecified or addr.is_loopback or addr.is_multicast:
         return False
     return True
+
+
+def is_fresh_event(event: dict, max_age: int) -> bool:
+    """Check if event timestamp is within max_age seconds of current time."""
+    ts = event.get("timestamp")
+    if ts is None:
+        return True  # No timestamp → allow (don't break on unexpected payloads)
+    try:
+        return abs(time.time() - float(ts)) <= max_age
+    except (TypeError, ValueError):
+        return True  # Non-numeric timestamp → allow
 
 
 def extract_username(event: dict) -> Optional[str]:
@@ -64,15 +76,37 @@ async def receive_webhook(request: Request) -> Response:
         return Response(status_code=202)
 
     events = payload.get("events", [])
+    if not isinstance(events, list):
+        logger.debug("Invalid events field: not a list")
+        return Response(status_code=400)
+
     logger.debug("Processing topic=%s with %d events", topic, len(events))
     EVENTS_RECEIVED.labels(topic=topic).inc(len(events))
 
     r = await get_redis()
+
+    # Queue depth cap — reject entire webhook if queue is full
+    queue_depth = await r.llen(QUEUE_KEY)
+    if queue_depth >= settings.max_queue_depth:
+        logger.warning("Queue full (%d >= %d), rejecting webhook",
+                        queue_depth, settings.max_queue_depth)
+        WEBHOOK_QUEUE_FULL.inc()
+        return Response(
+            content=json.dumps({"error": "queue full"}),
+            status_code=429,
+            media_type="application/json",
+        )
+
     queued = 0
 
     for event in events:
         username = extract_username(event)
         ip = event.get("client_ip")
+
+        if not is_fresh_event(event, settings.webhook_max_age):
+            logger.debug("Skipping stale event: timestamp=%s", event.get("timestamp"))
+            EVENTS_REJECTED.labels(reason="stale_event").inc()
+            continue
 
         ssid = event.get("ssid", "")
         if ssid and ssid.lower() in settings.ignore_ssid_set:

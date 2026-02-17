@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_format: str = "text"
     ignore_ssids: str = ""
+    max_queue_depth: int = 10000
+    webhook_max_age: int = 300  # seconds; reject events older than this
 
     def validate_pa_credentials(self) -> None:
         """Validate that either pa_api_key or pa_username+pa_password is set."""

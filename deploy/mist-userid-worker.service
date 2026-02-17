@@ -20,6 +20,11 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+PrivateDevices=yes
+RestrictNamespaces=yes
+LockPersonality=yes
 
 # Environment
 EnvironmentFile=/etc/mist-userid/env

@@ -50,13 +50,10 @@ def validate_username(username: str) -> tuple[bool, str]:
     """
     if len(username) > MAX_USERNAME_LENGTH:
         return False, "too_long"
-    # Reject control characters (ASCII 0-31) and null bytes
+    # Reject control characters (ASCII 0-31, includes null bytes)
     for char in username:
         if ord(char) < 32:
             return False, "control_chars"
-    # Reject XML-unsafe characters that could break attribute parsing
-    if "\x00" in username:
-        return False, "null_byte"
     return True, ""
 
 

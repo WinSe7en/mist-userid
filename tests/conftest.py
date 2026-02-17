@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 
 import fakeredis.aioredis
 import pytest
@@ -67,6 +68,7 @@ def sign_payload(webhook_secret):
 
 @pytest.fixture
 def sample_client_join_event():
+    now = int(time.time())
     return {
         "topic": "client-join",
         "events": [
@@ -78,8 +80,8 @@ def sample_client_join_event():
                 "client_hostname": "Test-Laptop",
                 "client_ip": "10.5.72.249",
                 "client_username": "alex.taylor@example.edu",
-                "connect": 1769121852,
-                "connect_float": 1769121852.22,
+                "connect": now,
+                "connect_float": now + 0.22,
                 "mac": "020000000c04",
                 "org_id": "00000000-0000-4000-8000-000000000001",
                 "random_mac": False,
@@ -87,7 +89,7 @@ def sample_client_join_event():
                 "site_id": "00000000-0000-4000-8000-000000000002",
                 "site_name": "North_Hall",
                 "ssid": "eduroam",
-                "timestamp": 1769121852,
+                "timestamp": now,
                 "version": 2,
                 "wlan_id": "00000000-0000-4000-8000-000000000003",
             }
@@ -97,6 +99,7 @@ def sample_client_join_event():
 
 @pytest.fixture
 def sample_client_session_roam():
+    now = int(time.time())
     return {
         "topic": "client-sessions",
         "events": [
@@ -105,8 +108,8 @@ def sample_client_session_roam():
                 "ap_name": "South-173",
                 "client_ip": "10.7.71.140",
                 "client_username": "casey.garcia-lopez@example.edu",
-                "connect": 1769117271,
-                "disconnect": 1769117307,
+                "connect": now - 36,
+                "disconnect": now,
                 "duration": 36.146,
                 "mac": "020000000c02",
                 "next_ap": "020000000a07",
@@ -114,7 +117,7 @@ def sample_client_session_roam():
                 "random_mac": True,
                 "ssid": "eduroam",
                 "termination_reason": 3,
-                "timestamp": 1769117307,
+                "timestamp": now,
                 "version": 2,
                 "wlan_id": "00000000-0000-4000-8000-000000000003",
             }
@@ -124,6 +127,7 @@ def sample_client_session_roam():
 
 @pytest.fixture
 def sample_client_session_disconnect():
+    now = int(time.time())
     return {
         "topic": "client-sessions",
         "events": [
@@ -132,8 +136,8 @@ def sample_client_session_disconnect():
                 "ap_name": "north-1-121d",
                 "client_ip": "10.5.141.80",
                 "client_username": "jordan.smith@example.edu",
-                "connect": 1769117238,
-                "disconnect": 1769117262,
+                "connect": now - 24,
+                "disconnect": now,
                 "duration": 24.54,
                 "mac": "020000000c03",
                 "next_ap": "000000000000",
@@ -141,7 +145,7 @@ def sample_client_session_disconnect():
                 "random_mac": True,
                 "ssid": "eduroam",
                 "termination_reason": 1,
-                "timestamp": 1769117262,
+                "timestamp": now,
                 "version": 2,
                 "wlan_id": "00000000-0000-4000-8000-000000000003",
             }
@@ -151,6 +155,7 @@ def sample_client_session_disconnect():
 
 @pytest.fixture
 def sample_psk_event():
+    now = int(time.time())
     return {
         "topic": "client-join",
         "events": [
@@ -162,7 +167,7 @@ def sample_psk_event():
                 "psk_name": "Morgan.Riley@example.edu",
                 "random_mac": True,
                 "ssid": "Resident_Wireless",
-                "timestamp": 1769121848,
+                "timestamp": now,
                 "version": 2,
                 "wlan_id": "00000000-0000-4000-8000-000000000005",
             }

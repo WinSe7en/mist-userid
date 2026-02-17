@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -221,6 +222,7 @@ async def test_webhook_uses_psk_name_fallback(
 
 @pytest.mark.asyncio
 async def test_webhook_handles_multiple_events(client, fake_redis, sign_payload):
+    now = int(time.time())
     payload = {
         "topic": "client-sessions",
         "events": [
@@ -229,15 +231,18 @@ async def test_webhook_handles_multiple_events(client, fake_redis, sign_payload)
                 "client_ip": "10.1.1.1",
                 "next_ap": "020000000a07",
                 "termination_reason": 3,
+                "timestamp": now,
             },
             {
                 "client_username": "user2@example.edu",
                 "client_ip": "10.1.1.2",
                 "next_ap": "000000000000",
                 "termination_reason": 1,
+                "timestamp": now,
             },
             {
                 "mac": "aabbccddeeff",  # no username, should be skipped
+                "timestamp": now,
             },
         ],
     }
@@ -250,3 +255,153 @@ async def test_webhook_handles_multiple_events(client, fake_redis, sign_payload)
     )
     assert resp.status_code == 202
     assert resp.json()["queued"] == 2
+
+
+# --- Security hardening tests ---
+
+
+@pytest.mark.asyncio
+async def test_webhook_rejects_stale_events(client, fake_redis, sign_payload):
+    """Events with timestamps older than webhook_max_age should be rejected."""
+    stale_ts = int(time.time()) - 600  # 10 minutes ago (max_age=300s)
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "stale@example.edu",
+                "client_ip": "10.1.1.1",
+                "mac": "aabbccddeeff",
+                "timestamp": stale_ts,
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_accepts_recent_events(client, fake_redis, sign_payload):
+    """Events with current timestamps should be accepted."""
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "recent@example.edu",
+                "client_ip": "10.1.1.1",
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_webhook_rejects_when_queue_full(client, fake_redis, sign_payload):
+    """Webhook should return 429 when queue is at max depth."""
+    # Fill queue to max_queue_depth (default 10000)
+    for i in range(10000):
+        await fake_redis.lpush("userid_queue", f"item-{i}")
+
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "user@example.edu",
+                "client_ip": "10.1.1.1",
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 429
+    assert "queue full" in resp.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_webhook_skips_loopback_ip(client, fake_redis, sign_payload):
+    """Loopback IPs should be rejected."""
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "user@example.edu",
+                "client_ip": "127.0.0.1",
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_skips_multicast_ip(client, fake_redis, sign_payload):
+    """Multicast IPs should be rejected."""
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "user@example.edu",
+                "client_ip": "224.0.0.1",
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_rejects_non_list_events(client, fake_redis, sign_payload):
+    """Non-list events field should return 400."""
+    payload = {
+        "topic": "client-join",
+        "events": "not_a_list",
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 400

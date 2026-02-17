@@ -10,6 +10,9 @@ EVENTS_QUEUED = Counter(
 EVENTS_REJECTED = Counter(
     "mist_userid_events_rejected_total", "Events rejected", ["reason"]
 )
+WEBHOOK_QUEUE_FULL = Counter(
+    "mist_userid_webhook_queue_full_total", "Webhooks rejected due to full queue"
+)
 
 # Worker
 EVENTS_DEDUPED = Counter(
