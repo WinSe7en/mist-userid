@@ -27,7 +27,7 @@ Two systemd services: an API receiver (returns 202 immediately) and a separate w
 
 ## Versioning
 
-- Semantic versioning, current: **0.2.1**
+- Semantic versioning, current: **0.3.0**
 - Version tracked in `app/__init__.py`
 - Git tags: `v0.1.0`, `v0.2.0`, etc.
 - Open source (MIT License)
