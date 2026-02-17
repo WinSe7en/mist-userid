@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0] - 2026-02-17
+
+### Added
+- **Webhook replay protection**: Events older than `WEBHOOK_MAX_AGE` (default 300s) are rejected, preventing replay attacks with stale user-to-IP mappings
+- **Queue depth cap**: Webhooks return 429 when Redis queue reaches `MAX_QUEUE_DEPTH` (default 10,000), preventing unbounded queue growth under DoS
+- **IP validation hardening**: Loopback (`127.0.0.0/8`) and multicast (`224.0.0.0/4`) IPs are now rejected in addition to link-local and unspecified
+- **Events type validation**: Non-list `events` field returns 400 instead of crashing
+- **DLQ size cap**: Dead-letter queue capped at 1,000 entries via `LTRIM` (oldest dropped)
+- **Queue-full metric**: `mist_userid_webhook_queue_full_total` counter tracks 429 rejections
+- `WEBHOOK_MAX_AGE` and `MAX_QUEUE_DEPTH` config settings
+- 6 new security-focused tests (stale events, queue full, loopback/multicast IP, non-list events)
+
+### Changed
+- `is_valid_ip()` uses `addr.is_unspecified` instead of explicit `0.0.0.0` check (covers IPv6 `::` too)
+- nginx config restricts `/ready` and `/metrics` to `10.0.0.0/8` and `127.0.0.1`
+- systemd units hardened with `CapabilityBoundingSet=`, `RestrictAddressFamilies`, `PrivateDevices`, `RestrictNamespaces`, `LockPersonality`
+- Test fixtures use dynamic timestamps (compatible with replay protection)
+
+### Removed
+- Redundant null byte check in `validate_username()` (already covered by control character check)
+
 ## [0.2.1] - 2026-01-26
 
 ### Added
