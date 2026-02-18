@@ -804,24 +804,44 @@ git pull
 # 2. Run tests
 python3 -m pytest -v
 
-# 3. Copy updated files to production
+# 3. Copy updated app files to production
 sudo cp app/*.py /opt/mist-userid/app/
 
-# 4. Restart affected service(s)
-# - Changed webhook.py or main.py? Restart API
+# 4. If systemd unit files changed (CapabilityBoundingSet, hardening directives, etc.)
+sudo cp deploy/mist-userid-api.service deploy/mist-userid-worker.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# 5. If nginx config changed (ACLs, location blocks, etc.)
+sudo cp deploy/nginx-mist-userid.conf /etc/nginx/conf.d/mist-userid.conf
+sudo nginx -t && sudo systemctl reload nginx
+
+# 6. Restart affected service(s)
+# - Changed webhook.py or main.py? Restart API only
 sudo systemctl restart mist-userid-api
 
-# - Changed paloalto.py, pa_auth.py, worker.py, dedup.py? Restart worker
+# - Changed paloalto.py, pa_auth.py, worker.py, dedup.py? Restart worker only
 sudo systemctl restart mist-userid-worker
 
 # - Changed config.py or metrics.py? Restart both
 sudo systemctl restart mist-userid-api mist-userid-worker
 
-# 5. Verify
+# 7. Verify
 curl -s http://localhost:8000/health
 curl -s http://localhost:8000/ready | python3 -m json.tool
-sudo systemctl status mist-userid-worker --no-pager | head -10
+redis-cli LLEN userid_queue
+redis-cli LLEN userid_dlq
 ```
+
+**What changed → what to restart:**
+
+| Files changed | Action |
+|---------------|--------|
+| `app/webhook.py`, `app/main.py` | Restart API |
+| `app/worker.py`, `app/paloalto.py`, `app/pa_auth.py`, `app/dedup.py` | Restart worker |
+| `app/config.py`, `app/metrics.py` | Restart both |
+| `deploy/mist-userid-*.service` | `daemon-reload` + restart both |
+| `deploy/nginx-mist-userid.conf` | `nginx -t && systemctl reload nginx` |
+| `deploy/env.example` | No action (template only; edit `/etc/mist-userid/env` manually if needed) |
 
 **Full redeploy** (new dependencies, systemd changes, etc.):
 
