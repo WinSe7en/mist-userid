@@ -21,6 +21,16 @@
 ### Removed
 - Redundant null byte check in `validate_username()` (already covered by control character check)
 
+### Fixed (post-release)
+- `EVENTS_RECEIVED` metric was incremented before queue depth check, causing over-count when 429 is returned; moved to after the guard
+- Queue-full test hardcoded `10000` instead of reading from settings; now derived from `get_settings().max_queue_depth`
+- `MAX_QUEUE_DEPTH` and `WEBHOOK_MAX_AGE` added to conftest test environment (previously relied on silent defaults)
+- `MAX_QUEUE_DEPTH` and `WEBHOOK_MAX_AGE` added to README and SPEC configuration reference tables
+
+### Docs (post-release)
+- Added **Scaling & Performance** section to README with capacity thresholds, metrics to watch during building rollout, and documented optimization opportunities (Redis pipeline, `time.time()` capture, `ignore_ssid_set` caching)
+- Expanded **Future: High Availability** section with full migration guide for F5 + two app servers + dedicated Redis server, including rolling update procedure and config change table
+
 ## [0.2.1] - 2026-01-26
 
 ### Added
