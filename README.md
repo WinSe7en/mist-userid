@@ -123,6 +123,8 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 | `LOG_LEVEL` | No | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
 | `LOG_FORMAT` | No | `text` | Log format: `text` or `json` |
 | `IGNORE_SSIDS` | No | *(empty)* | Comma-separated SSIDs to ignore (case-insensitive) |
+| `MAX_QUEUE_DEPTH` | No | `10000` | Reject webhooks with 429 when queue reaches this depth |
+| `WEBHOOK_MAX_AGE` | No | `300` | Reject events with timestamps older than this many seconds |
 
 ### Multi-Target Example
 
@@ -491,6 +493,87 @@ pytest tests/test_webhook.py -v
     </logout>
   </payload>
 </uid-message>
+```
+
+## Scaling & Performance
+
+This service is designed for 10,000+ users at 100+ events/second. As buildings are added to Mist coverage, use the metrics below to stay ahead of capacity limits.
+
+### Metrics to Watch During Rollout
+
+```bash
+# Queue depth — should be 0 or near 0 at steady state
+redis-cli LLEN userid_queue
+
+# Events queued per second (watch this climb after each building goes live)
+curl -s http://localhost:8000/metrics | grep events_queued_total
+
+# Events rejected (stale/invalid) — a spike here indicates a configuration problem
+curl -s http://localhost:8000/metrics | grep events_rejected_total
+
+# Queue-full rejections — if this is non-zero, the worker can't keep up with the webhook rate
+curl -s http://localhost:8000/metrics | grep webhook_queue_full_total
+
+# PA API latency (p99 latency climbing = PA is under load or WAN issues)
+curl -s http://localhost:8000/metrics | grep pa_request_duration
+```
+
+### Capacity Thresholds
+
+| Signal | Healthy | Investigate | Action |
+|--------|---------|-------------|--------|
+| Queue depth | 0–10 | 10–500 | >500: worker falling behind |
+| `webhook_queue_full_total` | 0 | Any | Worker can't drain queue; see below |
+| PA request latency (p99) | <1s | 1–5s | >5s: PA overloaded or WAN issue |
+| API memory | <300MB | 300–400MB | >400MB: reduce `--workers` count |
+| Worker memory | <150MB | 150–200MB | >200MB: check for batch accumulation |
+
+### What Happens at Scale
+
+**At current scale (~1 building):** The architecture has significant headroom. A typical Mist campus event arrives at 1–10 events/sec per building. The worker drains the queue faster than events arrive.
+
+**As buildings are added:** Each building adds roughly proportional event volume. The bottleneck order is:
+1. **PA API throughput** — batch size (50 events) and flush interval (2s) control how many XML requests/sec go to PA. If PA is slow, the worker accumulates a backlog.
+2. **Redis queue depth** — if PA is slow for >5 minutes, the queue grows. Monitor `userid_queue` depth.
+3. **Webhook receiver throughput** — uvicorn with 4 workers handles thousands of requests/sec. This is unlikely to be the bottleneck.
+
+### Known Optimization Opportunities
+
+These are not needed at current scale but are documented for when load grows:
+
+**1. Redis pipeline for batch pushes (most impactful)**
+
+Currently each queued event is a separate `LPUSH` Redis call. At high event rates, this adds per-event round-trip overhead (~0.1ms each on localhost). When this becomes a bottleneck, replace the per-event `lpush` calls in `app/webhook.py` with a Redis pipeline:
+
+```python
+async with r.pipeline() as pipe:
+    for serialized_event in valid_events:
+        pipe.lpush(QUEUE_KEY, serialized_event)
+    await pipe.execute()
+```
+
+This collapses N Redis calls per webhook into 1 round trip. Implement this if webhook handler latency climbs above ~50ms under load.
+
+**2. Capture `time.time()` once per webhook (minor)**
+
+`is_fresh_event()` calls `time.time()` once per event. For a 50-event webhook this is 50 syscalls when 1 would do. Capture `now = time.time()` before the event loop and pass it in. Negligible until very high event rates.
+
+**3. Cache `ignore_ssid_set` on the Settings object (minor)**
+
+`settings.ignore_ssid_set` is a `@property` that rebuilds the set on every access. In the event loop that's one rebuild per event. If you have many ignored SSIDs and high event volume, caching the result as a private attribute would help. Not measurable at current scale.
+
+### When to Increase `--workers`
+
+The API service runs `uvicorn` with `--workers 4`. Each worker handles webhook validation and Redis pushes. Since the work is I/O-bound (Redis writes), 4 workers is generous for current load. If you see uvicorn CPU usage consistently above 80% on all 4 workers, increase to 8. Match to available cores.
+
+```bash
+# Check current CPU per worker
+ps aux | grep uvicorn
+
+# Edit worker count in service file
+sudo vi /etc/systemd/system/mist-userid-api.service
+# Change: --workers 4  →  --workers 8
+sudo systemctl daemon-reload && sudo systemctl restart mist-userid-api
 ```
 
 ## Troubleshooting
@@ -866,16 +949,136 @@ show user ip-user-mapping all | match 10.5.
 show user ip-user-mapping all | match 198.51.100.
 ```
 
-## Future: High Availability (F5)
+## Future: High Availability (F5 + Two App Servers + Redis Server)
 
-Production plan: two instances behind an F5 load balancer for zero-downtime patching.
+**Current state:** Single server (dev-prod) running API, worker, Redis, and nginx on one box. Acceptable for early rollout; not resilient to reboots or updates.
 
-- **API**: Stateless — F5 round-robins between both boxes, no session affinity needed
-- **Worker**: Safe to run on both boxes — Redis `BRPOP` is atomic, each event consumed by exactly one worker
-- **Redis**: Must be shared between both boxes (dedicated Redis host or networked Redis with sentinel)
-- **TLS**: F5 terminates TLS, backends use HTTP on port 8000
+**Target state:** Three-server environment for zero-downtime patching and rolling reboots.
 
-When ready, change `REDIS_URL` on both boxes to point to the shared Redis host and remove the local nginx proxy.
+```
+Mist Cloud
+    │ HTTPS
+    ▼
+┌──────────────────────────────┐
+│  F5 Load Balancer            │  TLS termination, health-check based routing
+│  (VIP: webhook-vip.example.edu)   │
+└──────────┬─────────────────┬─┘
+           │                 │
+    ┌──────▼──────┐   ┌──────▼──────┐
+    │  App Server 1│   │  App Server 2│   Both run: FastAPI API + Worker
+    │  (active)   │   │  (active)   │   No session affinity needed
+    └──────┬───────┘   └──────┬──────┘
+           │                  │
+           └────────┬─────────┘
+                    │ redis://redis-host:6379
+              ┌─────▼──────┐
+              │  Redis Host │   Shared queue + dedup cache
+              │             │   (single source of truth)
+              └─────────────┘
+                    │
+                    ▼
+            PA Firewalls / Panorama
+```
+
+### Why This Works
+
+**API (stateless):** The webhook handler validates the signature, checks queue depth, and pushes to Redis. No local state. F5 can round-robin freely between both app servers — no session affinity needed.
+
+**Worker (safe to run on both boxes):** Redis `BRPOP` is atomic — each event is consumed by exactly one worker, whichever pops it first. Running two workers doubles throughput and means one can be stopped for maintenance while the other keeps draining the queue.
+
+**Redis (shared state):** All coordination (event queue, dedup cache) lives in Redis. The app servers are interchangeable because they share the same Redis instance.
+
+### Migration Steps
+
+**Prerequisites:**
+- Dedicated Redis host provisioned and accessible from both app servers
+- F5 VIP configured with health-check monitor on `/health` (HTTP 200 = in service)
+- Both app servers have the service installed and configured
+
+**Step 1 — Set up the Redis host**
+```bash
+# On the Redis host
+sudo dnf install redis
+sudo systemctl enable --now redis
+
+# Bind Redis to the management interface (not 0.0.0.0)
+# Edit /etc/redis/redis.conf:
+#   bind 127.0.0.1 <redis-host-mgmt-ip>
+#   requirepass <strong-password>
+
+sudo systemctl restart redis
+
+# Verify from an app server
+redis-cli -h <redis-host> -a <password> ping
+```
+
+**Step 2 — Update both app servers to point at shared Redis**
+```bash
+# On each app server, edit /etc/mist-userid/env:
+REDIS_URL=redis://:<password>@<redis-host>:6379
+
+sudo systemctl restart mist-userid-api mist-userid-worker
+curl -s http://localhost:8000/ready  # should show redis: reachable
+```
+
+**Step 3 — Configure F5**
+- VIP: existing public IP/hostname (`webhook-vip.example.edu`)
+- Pool members: both app server IPs, port 443 (or 80 if F5 terminates TLS)
+- Health monitor: HTTP GET `/health` → expect `200 OK` with `{"status": "ok"}`
+- Load balancing: round-robin (no persistence/affinity needed)
+- TLS: terminate on F5; backends communicate over HTTP port 8000
+
+**Step 4 — Remove nginx from the equation (optional)**
+
+With F5 doing TLS termination, nginx on the app servers becomes redundant. You can either:
+- Keep nginx (provides local ACLs for `/ready` and `/metrics`) — recommended
+- Remove nginx and have F5 proxy directly to uvicorn on port 8000
+
+**Step 5 — Update Mist webhook URL**
+
+The webhook URL stays the same (the F5 VIP hostname doesn't change). No Mist reconfiguration needed.
+
+### Rolling Updates (Zero Downtime)
+
+Once in the three-server state, deploy updates without dropping a single webhook:
+
+```bash
+# 1. Remove server 1 from F5 pool (or mark down in health check)
+#    F5 routes all traffic to server 2
+
+# 2. Update server 1
+cd /home/matt.johnson.03/projects/mist-userid
+git pull
+sudo cp app/*.py /opt/mist-userid/app/
+sudo systemctl restart mist-userid-api mist-userid-worker
+
+# 3. Verify server 1 is healthy
+curl -s http://server1:8000/health
+curl -s http://server1:8000/ready
+
+# 4. Return server 1 to F5 pool
+
+# 5. Repeat for server 2
+```
+
+### Configuration Changes for HA
+
+| Setting | Current (dev-prod) | HA Target |
+|---------|-------------------|-----------|
+| `REDIS_URL` | `redis://localhost:6379` | `redis://:<pass>@redis-host:6379` |
+| nginx TLS | On each app server | F5 terminates; nginx optional |
+| Mist webhook URL | `https://webhook-vip.example.edu/mist/webhook` | Same — no change |
+| Firewall | Port 443 open to Mist cloud IPs | Same on F5 VIP; app servers only need port 8000 from F5 |
+
+### Redis Auth in `/etc/mist-userid/env`
+
+When Redis moves to a dedicated host with authentication:
+```bash
+# Format: redis://<user>:<password>@<host>:<port>/<db>
+REDIS_URL=redis://:your-redis-password@redis.example.edu:6379
+```
+
+No code changes needed — `REDIS_URL` is passed directly to `aioredis`.
 
 ## License
 

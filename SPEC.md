@@ -167,6 +167,8 @@ async def worker():
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `LOG_FORMAT` | Log format: `text` or `json` | `text` |
 | `IGNORE_SSIDS` | Comma-separated SSIDs to ignore (case-insensitive) | *(empty)* |
+| `MAX_QUEUE_DEPTH` | Reject webhooks with 429 when queue reaches this depth | `10000` |
+| `WEBHOOK_MAX_AGE` | Reject events with timestamps older than this many seconds | `300` |
 
 ## Graceful Shutdown & Watchdog
 - Worker catches `SIGTERM` and flushes the current batch before exiting

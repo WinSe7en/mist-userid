@@ -22,6 +22,8 @@ os.environ.update({
     "USERID_TIMEOUT": "60",
     "LOG_LEVEL": "DEBUG",
     "LOG_FORMAT": "text",
+    "MAX_QUEUE_DEPTH": "10000",
+    "WEBHOOK_MAX_AGE": "300",
 })
 
 

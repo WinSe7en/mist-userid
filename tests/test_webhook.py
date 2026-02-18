@@ -314,8 +314,9 @@ async def test_webhook_accepts_recent_events(client, fake_redis, sign_payload):
 @pytest.mark.asyncio
 async def test_webhook_rejects_when_queue_full(client, fake_redis, sign_payload):
     """Webhook should return 429 when queue is at max depth."""
-    # Fill queue to max_queue_depth (default 10000)
-    for i in range(10000):
+    from app.config import get_settings
+    max_depth = get_settings().max_queue_depth
+    for i in range(max_depth):
         await fake_redis.lpush("userid_queue", f"item-{i}")
 
     payload = {

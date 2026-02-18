@@ -80,9 +80,6 @@ async def receive_webhook(request: Request) -> Response:
         logger.debug("Invalid events field: not a list")
         return Response(status_code=400)
 
-    logger.debug("Processing topic=%s with %d events", topic, len(events))
-    EVENTS_RECEIVED.labels(topic=topic).inc(len(events))
-
     r = await get_redis()
 
     # Queue depth cap — reject entire webhook if queue is full
@@ -96,6 +93,9 @@ async def receive_webhook(request: Request) -> Response:
             status_code=429,
             media_type="application/json",
         )
+
+    logger.debug("Processing topic=%s with %d events", topic, len(events))
+    EVENTS_RECEIVED.labels(topic=topic).inc(len(events))
 
     queued = 0
 
