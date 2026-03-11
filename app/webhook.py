@@ -104,7 +104,14 @@ async def receive_webhook(request: Request) -> Response:
         ip = event.get("client_ip")
 
         if not is_fresh_event(event, settings.webhook_max_age):
-            logger.debug("Skipping stale event: timestamp=%s", event.get("timestamp"))
+            age = int(time.time() - float(event.get("timestamp", 0)))
+            logger.debug(
+                "Skipping stale event: age=%ds site=%s ap=%s ssid=%s",
+                age,
+                event.get("site_name", "unknown"),
+                event.get("ap_name", "unknown"),
+                event.get("ssid", "unknown"),
+            )
             EVENTS_REJECTED.labels(reason="stale_event").inc()
             continue
 

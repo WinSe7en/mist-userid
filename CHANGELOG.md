@@ -72,11 +72,24 @@
 ### Confirmed
 - Deduplication was already wired into worker loop at `app/worker.py:89` — no code change needed
 
+### Must Do (Pending)
+- ~~**Fix NTP**~~ — Done 2026-03-06: `chronyd` enabled, synced to `ntp.example.edu` (192.0.2.10 / 192.0.2.11), offset -20µs
+- **Escalate pan03 to network team** — 3 isolated failures logged (Feb 28, Mar 5, earlier); shared management path suspected
+- **Import Zabbix template** — `deploy/zabbix/mist-userid-template.yaml` written but never imported; no automated DLQ alerting until done
+- **Add Zabbix trigger for stale event rate spike** — `EVENTS_REJECTED{reason="stale_event"}` metric exists but no alert threshold; spike to 29,000 events went undetected until manual review
+- ~~**Verify `userid_timeout` (60 min)**~~ — Done 2026-03-06: increased to 360 min (6 hrs); balances student DHCP lease (16 hrs) vs faculty/staff lease (2 hrs); faculty/staff stale window acceptable given AD User-ID as primary source; logout events still clean up immediately on disconnect
+- **DLQ replay mechanism** — failed batches are currently lost; need a script or worker feature to retry DLQ entries after PA recovers
+- **Periodic mapping refresh** — users stationary on one AP for >8 hrs (overnight residential, all-day office) will fall out of PA table; extend building onboarding script to run on a schedule (every ~7 hrs) querying Mist API for connected clients and re-pushing their mappings
+- ~~**Write runbook/SOP**~~ — Done 2026-03-11: `docs/runbook.md` covering DLQ, stale event spikes, PA auth failures, webhook reset, building onboarding, service won't start, high queue depth, key config reference, and known issues history
+
 ### Future (Roadmap)
+- **Bump `WEBHOOK_MAX_AGE` to 600s** — natural Mist batching delay observed at 316–761s; current 300s default rejects some legitimate events
+- **Redis auth + TLS** — required before HA migration when Redis port is exposed on the network
 - Shared/external Redis support for HA (two app instances behind F5)
 - `locustfile.py` for load testing (validate 100 events/sec capacity)
 - `make status` target showing queue depth, event rates, service health
 - Site filtering, rate limiting, username domain filtering
+- **Building onboarding script**: query Mist REST API (`GET /api/v1/sites/{site_id}/stats/clients`) for currently-connected clients at a site and bulk-register all user-to-IP mappings with PA via a one-shot `<login>` batch; eliminates the gap where users connected before webhook activation are unknown to PA until they roam or reconnect
 
 ## [0.1.0] - 2025-01-22
 
