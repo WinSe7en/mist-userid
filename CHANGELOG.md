@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1] - 2026-03-11
+
+### Changed
+- `USERID_TIMEOUT` increased from 60 min to 360 min (6 hrs) to prevent wireless-only users from falling out of the PA User-ID table during stationary sessions; logout events still remove mappings immediately on disconnect
+- Stale event log line now includes age in seconds, site name, AP name, and SSID for faster triage during retry storms
+- `env.example` USERID_TIMEOUT guidance updated for mixed DHCP lease environments (students 16hr vs faculty/staff 2hr)
+
+### Ops
+- NTP enabled: `chronyd` configured with campus time servers (`ntp.example.edu` — 192.0.2.10 / 192.0.2.11)
+- SELinux policy updated: `syslogd_port_t` now allows TCP 5555 for StellarCyber log forwarding via rsyslogd
+- `docs/runbook.md` added covering 7 operational procedures: DLQ entries, stale event spikes, PA auth failures, Mist webhook reset, building onboarding, service won't start, high queue depth; includes config reference table and known issues history
+
 ## [0.3.0] - 2026-02-17
 
 ### Added
