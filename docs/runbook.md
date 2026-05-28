@@ -258,7 +258,36 @@ curl -s http://localhost/metrics | grep -E "^mist_"
 
 ---
 
-### 7. High Queue Depth
+### 7. PA SSL Certificate Expired
+
+**Symptom:** Worker logs show `CERTIFICATE_VERIFY_FAILED: certificate has expired`, worker watchdog crash (systemd reports `Failed with result 'watchdog'`), DLQ accumulating rapidly.
+
+**Check cert expiry on both targets:**
+```bash
+echo | openssl s_client -connect pa-fw-01.mgmt.example.edu:443 2>/dev/null | openssl x509 -noout -dates
+echo | openssl s_client -connect pa-fw-02.mgmt.example.edu:443 2>/dev/null | openssl x509 -noout -dates
+```
+
+**Steps:**
+1. Escalate cert renewal to whoever manages the PA firewalls
+2. While cert is being renewed, pan04 handles all traffic (worker falls back automatically)
+3. After cert renewed, restart the worker to clear the SSL error state:
+   ```bash
+   sudo systemctl restart mist-userid-worker
+   ```
+4. Verify both targets responding:
+   ```bash
+   sudo journalctl -u mist-userid-worker -f 2>/dev/null | grep "HTTP Request"
+   ```
+5. Clear DLQ accumulated during outage: `redis-cli DEL userid_dlq`
+
+**Prevention:** Both PA certs are on annual cycles. Set calendar reminders ~30 days before expiry:
+- pan03: ~Nov 2026
+- pan04: ~Apr 2027
+
+---
+
+### 8. High Queue Depth
 
 **Symptom:** `redis-cli LLEN userid_queue` returns a large number (thousands); service returning 429.
 
@@ -308,3 +337,5 @@ curl -s http://localhost/metrics | grep -E "^mist_"
 | Mar 6, 2026 | SELinux blocking rsyslogd → StellarCyber (port 5555) | `semanage port -a -t syslogd_port_t -p tcp 5555` |
 | Mar 6, 2026 | NTP inactive | Enabled chronyd, pointed to ntp.example.edu |
 | Mar 6, 2026 | userid_timeout too short (60 min) | Increased to 360 min |
+| May 21–28, 2026 | pan03 SSL cert expired; daily DLQ failures, worker watchdog crash | Cert renewed (valid through Dec 12, 2026); worker restarted |
+| May 30, 2026 | pan04 SSL cert expiry pending | **Renewal required before May 30** |
