@@ -3,12 +3,8 @@
 ## [Unreleased]
 
 ### Ops
-- **2026-05-28 — PA SSL cert expiry incident**: pan03 cert expired 2026-05-21, causing daily DLQ failures and eventual worker watchdog crash (SIGABRT). pan03 cert renewed (valid through 2026-12-12). pan04 cert expires 2026-05-30 — **renewal pending**. Root cause of months of intermittent pan03 DLQ entries identified.
-- **Action required**: Renew pan04 (`pa-fw-02.mgmt.example.edu`) SSL cert before 2026-05-30
-
-### Must Do (Pending)
-- **Renew pan04 SSL cert** — expires 2026-05-30 (2 days); will cause same watchdog crash + DLQ flood as pan03
-- **Set calendar reminders for PA cert renewals** — both certs are now on annual cycles; pan03 due ~Dec 2026, pan04 due ~May 2027
+- **2026-05-28 — PA SSL cert expiry incident**: pan03 cert expired 2026-05-21, causing daily DLQ failures and eventual worker watchdog crash (SIGABRT). Both pan03 and pan04 certs renewed (valid through 2026-12-12). Root cause of months of intermittent DLQ entries identified.
+- **Set calendar reminder for ~2026-11-12** to renew both PA certs before Dec 12 expiry
 
 ## [0.3.1] - 2026-03-11
 

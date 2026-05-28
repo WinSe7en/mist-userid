@@ -281,9 +281,7 @@ echo | openssl s_client -connect pa-fw-02.mgmt.example.edu:443 2>/dev/null | ope
    ```
 5. Clear DLQ accumulated during outage: `redis-cli DEL userid_dlq`
 
-**Prevention:** Both PA certs are on annual cycles. Set calendar reminders ~30 days before expiry:
-- pan03: ~Nov 2026
-- pan04: ~Apr 2027
+**Prevention:** Both PA certs are on annual cycles, both now expiring Dec 12, 2026. Set a calendar reminder for **~Nov 12, 2026** to renew both before expiry. After renewal, both will likely align to the same date again.
 
 ---
 
@@ -337,5 +335,4 @@ echo | openssl s_client -connect pa-fw-02.mgmt.example.edu:443 2>/dev/null | ope
 | Mar 6, 2026 | SELinux blocking rsyslogd → StellarCyber (port 5555) | `semanage port -a -t syslogd_port_t -p tcp 5555` |
 | Mar 6, 2026 | NTP inactive | Enabled chronyd, pointed to ntp.example.edu |
 | Mar 6, 2026 | userid_timeout too short (60 min) | Increased to 360 min |
-| May 21–28, 2026 | pan03 SSL cert expired; daily DLQ failures, worker watchdog crash | Cert renewed (valid through Dec 12, 2026); worker restarted |
-| May 30, 2026 | pan04 SSL cert expiry pending | **Renewal required before May 30** |
+| May 21–28, 2026 | pan03 SSL cert expired; daily DLQ failures, worker watchdog crash | Both pan03 + pan04 certs renewed (valid through Dec 12, 2026); worker restarted; DLQ cleared |
