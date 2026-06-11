@@ -406,3 +406,101 @@ async def test_webhook_rejects_non_list_events(client, fake_redis, sign_payload)
         headers={"X-Mist-Signature-v2": sig},
     )
     assert resp.status_code == 400
+
+
+# --- Type-safety guards (24/7 crash hardening) ---
+
+
+@pytest.mark.asyncio
+async def test_webhook_skips_non_dict_event(client, fake_redis, sign_payload):
+    """A non-object entry in the events list must not crash the handler."""
+    payload = {
+        "topic": "client-join",
+        "events": ["just_a_string", 42],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_skips_numeric_username(client, fake_redis, sign_payload):
+    """A non-string username must be rejected, not crash sanitize_username."""
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": 12345,
+                "client_ip": "10.1.1.1",
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_skips_numeric_ip(client, fake_redis, sign_payload):
+    """An integer IP passes ipaddress.ip_address() but must be rejected."""
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "user@example.edu",
+                "client_ip": 167772161,  # would parse as 10.0.0.1 if allowed
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 0
+
+
+@pytest.mark.asyncio
+async def test_webhook_skips_non_string_ssid(client, fake_redis, sign_payload):
+    """A numeric ssid must not crash the ignore-SSID check."""
+    payload = {
+        "topic": "client-join",
+        "events": [
+            {
+                "client_username": "user@example.edu",
+                "client_ip": "10.1.1.1",
+                "ssid": 999,
+                "mac": "aabbccddeeff",
+                "timestamp": int(time.time()),
+            }
+        ],
+    }
+    body = json.dumps(payload).encode()
+    sig = sign_payload(body)
+    resp = await client.post(
+        "/mist/webhook",
+        content=body,
+        headers={"X-Mist-Signature-v2": sig},
+    )
+    # Event is otherwise valid — numeric ssid just isn't in the ignore set
+    assert resp.status_code == 202
+    assert resp.json()["queued"] == 1

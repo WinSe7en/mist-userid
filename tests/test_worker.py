@@ -95,3 +95,34 @@ class TestValidateUsername:
         is_valid, reason = validate_username("")
         assert is_valid is True
         assert reason == ""
+
+    def test_integer_username_rejected(self):
+        is_valid, reason = validate_username(12345)
+        assert is_valid is False
+        assert reason == "not_a_string"
+
+    def test_none_username_rejected(self):
+        is_valid, reason = validate_username(None)
+        assert is_valid is False
+        assert reason == "not_a_string"
+
+    def test_list_username_rejected(self):
+        is_valid, reason = validate_username(["user@example.edu"])
+        assert is_valid is False
+        assert reason == "not_a_string"
+
+
+class TestWatchdogHeartbeat:
+    @pytest.mark.asyncio
+    async def test_heartbeat_pings_and_cancels(self, monkeypatch):
+        import asyncio
+        from app import worker
+
+        pings = []
+        monkeypatch.setattr(worker.notifier, "notify", pings.append)
+
+        task = asyncio.create_task(worker.watchdog_heartbeat())
+        await asyncio.sleep(0.01)  # let the task run its first iteration
+        task.cancel()
+
+        assert "WATCHDOG=1" in pings

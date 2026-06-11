@@ -1,6 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.2] - 2026-05-28
+
+### Fixed
+- **Watchdog false-positive crash** (root cause of May 9 and May 28 worker crashes): the systemd watchdog was fed once per worker loop iteration, but a batch flush during a PA outage legitimately blocks the loop for 31s+ of retry backoff — exceeding `WatchdogSec=30` and getting the worker SIGABRT'd mid-flush. The watchdog is now fed every 10s by a dedicated asyncio task (`watchdog_heartbeat()`); a frozen event loop still trips it, so real hang detection is preserved
+- **Worker crash on malformed events**: per-event processing is now wrapped in an exception guard — a single bad event (e.g. non-string `client_username` from Mist) can no longer kill the worker and dump its in-memory batch
+- **Worker crash-loop during Redis restarts**: `RedisError` on `brpop` now backs off 5s and retries instead of crashing every `RestartSec`
+- **Integer IPs passed webhook validation**: `ipaddress.ip_address()` accepts integers, so `is_valid_ip()` now requires a string; an integer IP previously queued successfully and then crashed the worker during XML serialization
+- **Type guards in webhook**: non-dict event entries, non-string usernames, and non-string SSIDs are rejected with metrics instead of raising (`malformed_event` / `invalid_username` rejection reasons added)
+- `validate_username()` returns `(False, "not_a_string")` for non-string input instead of raising `TypeError`
 
 ### Ops
 - **2026-05-28 — PA SSL cert expiry incident**: pan03 cert expired 2026-05-21, causing daily DLQ failures and eventual worker watchdog crash (SIGABRT). Both pan03 and pan04 certs renewed (valid through 2026-12-12). Root cause of months of intermittent DLQ entries identified.

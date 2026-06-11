@@ -27,7 +27,10 @@ def verify_signature(secret: str, body: bytes, signature: Optional[str]) -> bool
     return hmac.compare_digest(expected, signature)
 
 
-def is_valid_ip(ip: str) -> bool:
+def is_valid_ip(ip) -> bool:
+    # ipaddress.ip_address() accepts integers, so require a string explicitly
+    if not isinstance(ip, str):
+        return False
     try:
         addr = ipaddress.ip_address(ip)
     except ValueError:
@@ -100,6 +103,12 @@ async def receive_webhook(request: Request) -> Response:
     queued = 0
 
     for event in events:
+        if not isinstance(event, dict):
+            logger.debug("Skipping malformed event: not an object (type=%s)",
+                         type(event).__name__)
+            EVENTS_REJECTED.labels(reason="malformed_event").inc()
+            continue
+
         username = extract_username(event)
         ip = event.get("client_ip")
 
@@ -116,13 +125,19 @@ async def receive_webhook(request: Request) -> Response:
             continue
 
         ssid = event.get("ssid", "")
-        if ssid and ssid.lower() in settings.ignore_ssid_set:
+        if isinstance(ssid, str) and ssid and ssid.lower() in settings.ignore_ssid_set:
             logger.debug("Skipping event: ignored SSID=%s", ssid)
             EVENTS_REJECTED.labels(reason="ignored_ssid").inc()
             continue
         if not username:
             logger.debug("Skipping event: no username (mac=%s)", event.get("mac"))
             EVENTS_REJECTED.labels(reason="no_username").inc()
+            continue
+        if not isinstance(username, str):
+            # sanitize_username() below requires a string; reject odd types here
+            logger.debug("Skipping event: non-string username (type=%s)",
+                         type(username).__name__)
+            EVENTS_REJECTED.labels(reason="invalid_username").inc()
             continue
         if not ip:
             logger.debug("Skipping event: no IP for user=%s", sanitize_username(username))
