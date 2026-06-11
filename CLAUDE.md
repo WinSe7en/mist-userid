@@ -18,7 +18,7 @@ Two systemd services: an API receiver (returns 202 immediately) and a separate w
 
 ## Tech Stack & Platform
 
-- Python 3.9+ on RHEL 9
+- Python 3.12 (RHEL 9 app stream) — production venv at `/opt/mist-userid/venv`
 - FastAPI + uvicorn (async, multi-worker)
 - Redis (queue, dedup cache, rate limiting)
 - httpx (async HTTP client with connection pooling)

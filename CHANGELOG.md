@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Ops
+- **2026-06-10 — Python upgraded 3.9.21 → 3.12.13** (RHEL 9 app stream): production venv rebuilt at `/opt/mist-userid/venv`, all 104 tests pass, ~50s API downtime during cutover. Old venv kept at `/opt/mist-userid/venv-py39-old` for rollback; remove after a week of clean operation. Note: venvs are not relocatable (console-script shebangs bake in absolute paths) — always build at the final path.
+
 ## [0.3.2] - 2026-05-28
 
 ### Fixed
