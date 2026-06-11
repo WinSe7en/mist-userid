@@ -131,10 +131,9 @@ async def run_worker() -> None:
                     pass
 
                 try:
-                    result = await asyncio.wait_for(
-                        r.brpop(QUEUE_KEY, timeout=1), timeout=2.0
-                    )
-                except (asyncio.TimeoutError, TimeoutError):
+                    async with asyncio.timeout(2.0):
+                        result = await r.brpop(QUEUE_KEY, timeout=1)
+                except TimeoutError:
                     result = None
                 except RedisError as e:
                     # Redis down/restarting — back off instead of crashing,

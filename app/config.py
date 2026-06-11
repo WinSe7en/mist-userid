@@ -1,5 +1,4 @@
 import os
-from typing import List, Optional
 
 from pydantic_settings import BaseSettings
 
@@ -34,7 +33,7 @@ class Settings(BaseSettings):
             )
 
     @property
-    def pa_target_list(self) -> List[str]:
+    def pa_target_list(self) -> list[str]:
         return [t.strip() for t in self.pa_targets.split(",")]
 
     @property
@@ -49,7 +48,7 @@ class Settings(BaseSettings):
     }
 
 
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

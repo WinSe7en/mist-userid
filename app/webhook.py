@@ -4,7 +4,6 @@ import ipaddress
 import json
 import logging
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Request, Response
 
@@ -20,7 +19,7 @@ VALID_TOPICS = {"client-sessions", "client-join"}
 QUEUE_KEY = "userid_queue"
 
 
-def verify_signature(secret: str, body: bytes, signature: Optional[str]) -> bool:
+def verify_signature(secret: str, body: bytes, signature: str | None) -> bool:
     if not signature:
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -51,7 +50,7 @@ def is_fresh_event(event: dict, max_age: int) -> bool:
         return True  # Non-numeric timestamp → allow
 
 
-def extract_username(event: dict) -> Optional[str]:
+def extract_username(event: dict) -> str | None:
     return event.get("client_username") or event.get("psk_name") or None
 
 

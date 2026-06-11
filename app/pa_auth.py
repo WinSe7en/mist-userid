@@ -2,7 +2,6 @@
 
 import logging
 import xml.etree.ElementTree as ET
-from typing import Optional
 
 import httpx
 
@@ -10,7 +9,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_cached_api_key: Optional[str] = None
+_cached_api_key: str | None = None
 
 
 async def generate_api_key(
@@ -31,8 +30,7 @@ async def generate_api_key(
         Generated API key string
 
     Raises:
-        ValueError: If keygen fails or response is invalid
-        httpx.HTTPStatusError: If HTTP request fails
+        ValueError: If keygen fails, returns non-200, or response is invalid
     """
     url = f"{target.rstrip('/')}/api/"
     data = {
@@ -44,10 +42,10 @@ async def generate_api_key(
     resp = await client.post(url, data=data)
 
     if resp.status_code != 200:
-        raise httpx.HTTPStatusError(
-            f"HTTP {resp.status_code}: {resp.text[:100]}",
-            request=None,
-            response=resp,
+        # Not HTTPStatusError: newer httpx requires a request object there,
+        # and callers only need the failure reason for logging/fallback
+        raise ValueError(
+            f"Keygen HTTP {resp.status_code} from {target}: {resp.text[:100]}"
         )
 
     # Parse XML response:
@@ -126,6 +124,6 @@ def invalidate_api_key() -> None:
         _cached_api_key = None
 
 
-def get_cached_key() -> Optional[str]:
+def get_cached_key() -> str | None:
     """Return the currently cached key (for testing)."""
     return _cached_api_key

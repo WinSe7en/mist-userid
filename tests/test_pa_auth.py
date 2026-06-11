@@ -63,7 +63,7 @@ class TestGenerateApiKey:
         client = AsyncMock(spec=httpx.AsyncClient)
         client.post = AsyncMock(return_value=mock_resp)
 
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(ValueError, match="Keygen HTTP 500"):
             await generate_api_key(
                 client, "https://pa.example.com", "admin", "password"
             )
