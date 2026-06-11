@@ -84,6 +84,12 @@ async def run_worker() -> None:
     logger.info("Worker starting (batch_size=%d, flush_interval=%.1fs)",
                 settings.batch_size, settings.batch_flush_interval)
 
+    if not settings.pa_verify_ssl:
+        logger.warning(
+            "PA TLS certificate verification is DISABLED (PA_VERIFY_SSL=false) "
+            "— break-glass mode for cert incidents; re-enable after renewal"
+        )
+
     shutdown_event = asyncio.Event()
 
     def handle_signal(sig: int, _frame) -> None:
@@ -98,7 +104,7 @@ async def run_worker() -> None:
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=10.0),
         limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        verify=True,
+        verify=settings.pa_verify_ssl,
     ) as client:
         # Pre-generate/validate API key at startup (fail fast if credentials invalid)
         try:

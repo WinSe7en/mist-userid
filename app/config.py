@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     ignore_ssids: str = ""
     max_queue_depth: int = 10000
     webhook_max_age: int = 300  # seconds; reject events older than this
+    # Break-glass for PA cert incidents ONLY (see runbook); never leave false
+    pa_verify_ssl: bool = True
 
     def validate_pa_credentials(self) -> None:
         """Validate that either pa_api_key or pa_username+pa_password is set."""

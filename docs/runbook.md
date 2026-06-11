@@ -270,18 +270,30 @@ echo | openssl s_client -connect pa-fw-02.mgmt.example.edu:443 2>/dev/null | ope
 
 **Steps:**
 1. Escalate cert renewal to whoever manages the PA firewalls
-2. While cert is being renewed, pan04 handles all traffic (worker falls back automatically)
-3. After cert renewed, restart the worker to clear the SSL error state:
+2. While cert is being renewed, the unaffected target handles all traffic (worker falls back automatically)
+3. **If renewal will take more than a few hours** and mappings to the affected target matter, use the break-glass option — set in `/etc/mist-userid/env`:
+   ```
+   PA_VERIFY_SSL=false
+   ```
+   then `sudo systemctl restart mist-userid-worker mist-userid-api`. The worker logs a WARNING at every startup while this is set. **Revert to `true` and restart immediately after the cert is renewed** — the PA API key travels over the connection this protects.
+4. After cert renewed (and `PA_VERIFY_SSL` reverted), restart the worker to clear the SSL error state:
    ```bash
    sudo systemctl restart mist-userid-worker
    ```
-4. Verify both targets responding:
+5. Verify both targets responding:
    ```bash
    sudo journalctl -u mist-userid-worker -f 2>/dev/null | grep "HTTP Request"
    ```
-5. Clear DLQ accumulated during outage: `redis-cli DEL userid_dlq`
+6. Clear DLQ accumulated during outage: `redis-cli DEL userid_dlq`
 
-**Prevention:** Both PA certs are on annual cycles, both now expiring Dec 12, 2026. Set a calendar reminder for **~Nov 12, 2026** to renew both before expiry. After renewal, both will likely align to the same date again.
+**Prevention:**
+- **Automated daily check**: `mist-userid-certcheck.timer` runs `/opt/mist-userid/scripts/check_pa_certs.sh` every morning at ~08:00; certs within 30 days of expiry log WARNING to journald (forwarded to StellarCyber via rsyslog) and fail the unit (visible in `systemctl --failed` and Zabbix).
+   ```bash
+   # Manual check anytime:
+   sudo /opt/mist-userid/scripts/check_pa_certs.sh
+   ```
+- Zabbix item available: `mist.userid.cert.days[<host>]` (suggested triggers: `<30` warning, `<7` high)
+- Both PA certs currently expire **Dec 12, 2026** — calendar reminder set for ~Nov 12, 2026; the daily check is the backstop
 
 ---
 

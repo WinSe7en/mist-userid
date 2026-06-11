@@ -56,7 +56,7 @@ async def ready():
 
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(5.0, connect=3.0),
-        verify=True,
+        verify=settings.pa_verify_ssl,
     ) as client:
         # Verify API key is obtainable (static or generatable)
         try:

@@ -1,0 +1,7 @@
+[Unit]
+Description=PA firewall SSL certificate expiry check
+Documentation=https://github.com/WinSe7en/mist-userid
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mist-userid/scripts/check_pa_certs.sh 30
