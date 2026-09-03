@@ -7,11 +7,15 @@
 - **`PA_VERIFY_SSL` break-glass option** (default `true`): temporarily disable PA TLS verification during a cert incident so mappings keep flowing while the cert is renewed; worker logs a WARNING at startup while disabled (see runbook)
 
 ### Changed
+- **Requirements refreshed to the tested Python 3.12 baseline** (2026-09-03): floors bumped in `requirements*.txt` and `pyproject.toml` to the versions running in production (fastapi 0.136 / uvicorn 0.49 / httpx 0.28 / redis 8.0 / prometheus-client 0.25 / python-json-logger 4.x); pip-audit clean
+- **CI fixed**: test matrix dropped Python 3.9/3.10 (red since the June 3.11+ modernization — those interpreters SyntaxError on modern typing syntax)
+- **Docs aligned with current architecture**: README/SPEC now document `PA_VERIFY_SSL`, the daily cert-check timer, and the dedicated 10s watchdog heartbeat task (SPEC previously described the old per-loop notify that caused the May crashes)
 - **Python 3.11+ now required** (`requires-python = ">=3.11"`); pyproject version synced (was stale at 0.3.0), ruff target → py311
 - Modernized typing syntax (`X | None`, builtin generics) and worker queue read now uses `asyncio.timeout()` (3.11+)
 - **Fixed latent bug**: keygen non-200 responses raised `httpx.HTTPStatusError(request=None)`, which newer httpx rejects with `TypeError` — now raises `ValueError` with the target and status in the message
 
 ### Security
+- **2026-09-03 — Dependency audit (pip-audit)**: upgraded `pydantic-settings` ≥2.14.2 (GHSA-4xgf-cpjx-pc3j) and floored transitive `starlette` ≥1.3.1 (PYSEC-2026-248/249, multipart DoS on the public webhook endpoint); production venv upgraded to pydantic-settings 2.15.0 / starlette 1.6.0 and services restarted
 - **2026-09-03 — Repo sanitized, including full git history rewrite** (`git filter-repo`, 45 commits, force-pushed): replaced all real usernames with `example.edu` placeholders, Mist org/site/wlan/psk UUIDs with fixed test UUIDs, AP/client MACs with locally-administered `02:...` addresses, internal hostnames and firewall FQDNs with `*.example.edu` names, and campus IPs with RFC 5737 documentation ranges (`192.0.2.x` / `198.51.100.x`). Commit author identities that embedded an internal hostname were rewritten via mailmap. Pre-rewrite mirror kept locally (outside the repo) for reference.
 
 ### Ops
@@ -122,7 +126,7 @@
 - **Add Zabbix trigger for stale event rate spike** — `EVENTS_REJECTED{reason="stale_event"}` metric exists but no alert threshold; spike to 29,000 events went undetected until manual review
 - ~~**Verify `userid_timeout` (60 min)**~~ — Done 2026-03-06: increased to 360 min (6 hrs); balances student DHCP lease (16 hrs) vs faculty/staff lease (2 hrs); faculty/staff stale window acceptable given AD User-ID as primary source; logout events still clean up immediately on disconnect
 - ~~**Sanitize repo data (public GitHub repo!)**~~ — Done 2026-09-03: full sweep of usernames, UUIDs, MACs, hostnames, IPs, and building names, including git history rewrite with `git filter-repo` (see [Unreleased] Security note)
-- **Update documentation and requirements** — refresh requirements.txt pins for Python 3.12 baseline (consider `pip-audit` for CVE check), align README/SPEC with current architecture (cert check timer, PA_VERIFY_SSL, watchdog heartbeat)
+- ~~**Update documentation and requirements**~~ — Done 2026-09-03: requirements floors bumped to tested 3.12 baseline, pip-audit run (2 CVEs fixed, prod patched), README/SPEC aligned (PA_VERIFY_SSL, cert-check timer, watchdog heartbeat), CI matrix fixed (3.9/3.10 dropped)
 - **DLQ replay mechanism** — failed batches are currently lost; need a script or worker feature to retry DLQ entries after PA recovers
 - **Periodic mapping refresh** — users stationary on one AP for >8 hrs (overnight residential, all-day office) will fall out of PA table; extend building onboarding script to run on a schedule (every ~7 hrs) querying Mist API for connected clients and re-pushing their mappings
 - ~~**Write runbook/SOP**~~ — Done 2026-03-11: `docs/runbook.md` covering DLQ, stale event spikes, PA auth failures, webhook reset, building onboarding, service won't start, high queue depth, key config reference, and known issues history

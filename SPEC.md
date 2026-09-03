@@ -157,6 +157,7 @@ async def worker():
 | `PA_API_KEY` | API key for PA XML API (required if username/password not set) | *(empty)* |
 | `PA_USERNAME` | PA admin username for API key auto-generation | *(empty)* |
 | `PA_PASSWORD` | PA admin password for API key auto-generation | *(empty)* |
+| `PA_VERIFY_SSL` | Verify PA TLS certificates (break-glass: `false` during cert incidents only) | `true` |
 | `REDIS_URL` | Redis connection string | `redis://localhost:6379` |
 | `MIST_WEBHOOK_SECRET` | Shared secret for webhook signature validation | *(required)* |
 | `BATCH_SIZE` | Max items per PA API batch | `50` |
@@ -173,7 +174,7 @@ async def worker():
 ## Graceful Shutdown & Watchdog
 - Worker catches `SIGTERM` and flushes the current batch before exiting
 - Prevents loss of queued mappings during service restart (`systemctl restart`)
-- Worker calls `sd_notify("WATCHDOG=1")` on each batch flush (or idle loop iteration) to satisfy the systemd watchdog
+- Worker feeds the systemd watchdog from a dedicated asyncio heartbeat task every 10s (`watchdog_heartbeat()`), decoupled from the main loop — a batch flush during a PA outage can legitimately block the loop for 31s+ of retry backoff, which must not trip `WatchdogSec=30`. A genuinely frozen event loop stops the heartbeat too, so real hangs are still caught
 - Use `sdnotify` Python package or `systemd.daemon` for the notify call
 
 ## Health Check Endpoints

@@ -113,6 +113,7 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 | `PA_API_KEY` | Cond. | - | API key for PA XML API (required if username/password not set) |
 | `PA_USERNAME` | Cond. | - | PA admin username for auto-generating API key |
 | `PA_PASSWORD` | Cond. | - | PA admin password for auto-generating API key |
+| `PA_VERIFY_SSL` | No | `true` | **Break-glass only**: set `false` to skip PA TLS verification during a cert incident (worker logs a startup WARNING; see runbook) |
 | `MIST_WEBHOOK_SECRET` | Yes | - | Shared secret for webhook HMAC validation |
 | `REDIS_URL` | No | `redis://localhost:6379` | Redis connection string |
 | `BATCH_SIZE` | No | `50` | Max items per PA API batch |
@@ -200,6 +201,7 @@ sudo make clean
 |---------|-------------|--------------|
 | `mist-userid-api` | FastAPI webhook receiver (4 uvicorn workers) | 512M |
 | `mist-userid-worker` | Queue consumer + PA API sender | 256M |
+| `mist-userid-certcheck.timer` | Daily 08:00 PA certificate expiry check (`scripts/check_pa_certs.sh`, warns ≤30 days) | — |
 
 Both services:
 - Auto-restart on crash (`Restart=always`)
