@@ -1,11 +1,10 @@
 import logging
-
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app import __version__
 from app.config import get_settings
@@ -68,7 +67,7 @@ async def ready():
 
         for target in settings.pa_target_list:
             try:
-                resp = await client.head(target, follow_redirects=False)
+                await client.head(target, follow_redirects=False)
                 targets_status[target] = "reachable"
             except Exception as e:
                 targets_status[target] = f"unreachable: {type(e).__name__}"

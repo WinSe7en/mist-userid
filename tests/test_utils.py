@@ -1,4 +1,3 @@
-import pytest
 
 from app.utils import sanitize_username
 
