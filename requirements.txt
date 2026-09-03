@@ -1,8 +1,11 @@
-fastapi>=0.104.0
-uvicorn[standard]>=0.24.0
-httpx>=0.25.0
-redis[hiredis]>=5.0.0
-pydantic-settings>=2.1.0
+# Tested baseline: Python 3.12 (RHEL 9 app stream), pip-audit clean as of 2026-09-03
+fastapi>=0.136.0
+uvicorn[standard]>=0.49.0
+httpx>=0.28.0
+redis[hiredis]>=8.0.0
+pydantic-settings>=2.14.2  # >=2.14.2 fixes GHSA-4xgf-cpjx-pc3j
 sdnotify>=0.3.2
-prometheus-client>=0.20.0
-python-json-logger>=2.0.0
+prometheus-client>=0.25.0
+python-json-logger>=4.0.0
+# Transitive via fastapi, floored here for PYSEC-2026-248/249
+starlette>=1.3.1
