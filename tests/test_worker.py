@@ -1,6 +1,6 @@
 import pytest
 
-from app.worker import classify_event, validate_username, MAX_USERNAME_LENGTH
+from app.worker import MAX_USERNAME_LENGTH, classify_event, validate_username
 
 
 class TestClassifyEvent:
@@ -116,6 +116,7 @@ class TestWatchdogHeartbeat:
     @pytest.mark.asyncio
     async def test_heartbeat_pings_and_cancels(self, monkeypatch):
         import asyncio
+
         from app import worker
 
         pings = []

@@ -235,7 +235,7 @@ async def send_batch(
     )
 
     failed_targets = []
-    for target, result in zip(settings.pa_target_list, results):
+    for target, result in zip(settings.pa_target_list, results, strict=True):
         if isinstance(result, Exception):
             logger.error("Unexpected exception sending to %s: %s", target, result)
             PA_REQUESTS.labels(target=target, status="failure").inc()

@@ -1,6 +1,6 @@
 import pytest
 
-from app.dedup import is_duplicate, _make_dedup_key
+from app.dedup import _make_dedup_key, is_duplicate
 
 
 @pytest.mark.asyncio
