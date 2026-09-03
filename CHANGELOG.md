@@ -11,6 +11,9 @@
 - Modernized typing syntax (`X | None`, builtin generics) and worker queue read now uses `asyncio.timeout()` (3.11+)
 - **Fixed latent bug**: keygen non-200 responses raised `httpx.HTTPStatusError(request=None)`, which newer httpx rejects with `TypeError` — now raises `ValueError` with the target and status in the message
 
+### Security
+- **2026-09-03 — Repo sanitized, including full git history rewrite** (`git filter-repo`, 45 commits, force-pushed): replaced all real usernames with `example.edu` placeholders, Mist org/site/wlan/psk UUIDs with fixed test UUIDs, AP/client MACs with locally-administered `02:...` addresses, internal hostnames and firewall FQDNs with `*.example.edu` names, and campus IPs with RFC 5737 documentation ranges (`192.0.2.x` / `198.51.100.x`). Commit author identities that embedded an internal hostname were rewritten via mailmap. Pre-rewrite mirror kept locally (outside the repo) for reference.
+
 ### Ops
 - **2026-06-10 — Python upgraded 3.9.21 → 3.12.13** (RHEL 9 app stream): production venv rebuilt at `/opt/mist-userid/venv`, all 104 tests pass, ~50s API downtime during cutover. Old venv kept at `/opt/mist-userid/venv-py39-old` for rollback; remove after a week of clean operation. Note: venvs are not relocatable (console-script shebangs bake in absolute paths) — always build at the final path.
 
@@ -118,7 +121,7 @@
 - **Import Zabbix template** — `deploy/zabbix/mist-userid-template.yaml` written but never imported; no automated DLQ alerting until done
 - **Add Zabbix trigger for stale event rate spike** — `EVENTS_REJECTED{reason="stale_event"}` metric exists but no alert threshold; spike to 29,000 events went undetected until manual review
 - ~~**Verify `userid_timeout` (60 min)**~~ — Done 2026-03-06: increased to 360 min (6 hrs); balances student DHCP lease (16 hrs) vs faculty/staff lease (2 hrs); faculty/staff stale window acceptable given AD User-ID as primary source; logout events still clean up immediately on disconnect
-- **Sanitize repo data (public GitHub repo!)** — sweep for real internal data and replace with example.edu equivalents: real student usernames + org/site/wlan UUIDs + AP/building names in `tests/conftest.py` (captured from live events), PA hostnames (`pan0x-*.mgmt.example.edu`) in runbook/zabbix conf/CHANGELOG, campus IPs in README examples and runbook (time servers, client IPs), building names throughout docs. Decide whether to also scrub git history (rewrite + force push) or accept history as-is and only fix HEAD
+- ~~**Sanitize repo data (public GitHub repo!)**~~ — Done 2026-09-03: full sweep of usernames, UUIDs, MACs, hostnames, IPs, and building names, including git history rewrite with `git filter-repo` (see [Unreleased] Security note)
 - **Update documentation and requirements** — refresh requirements.txt pins for Python 3.12 baseline (consider `pip-audit` for CVE check), align README/SPEC with current architecture (cert check timer, PA_VERIFY_SSL, watchdog heartbeat)
 - **DLQ replay mechanism** — failed batches are currently lost; need a script or worker feature to retry DLQ entries after PA recovers
 - **Periodic mapping refresh** — users stationary on one AP for >8 hrs (overnight residential, all-day office) will fall out of PA table; extend building onboarding script to run on a schedule (every ~7 hrs) querying Mist API for connected clients and re-pushing their mappings
