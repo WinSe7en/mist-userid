@@ -89,7 +89,7 @@ LOGS="$(ls /var/log/messages* | tr '\n' ' ')"
 |---|-------|---------|---------|
 | A1 | Both services active, no restarts | `systemctl show mist-userid-api mist-userid-worker -p ActiveState,NRestarts,ActiveEnterTimestamp` | `active`, `NRestarts=0`, start time = last reboot |
 | A2 | No watchdog kills | `sudo grep -hciE "watchdog\|SIGABRT" $LOGS` | `0` |
-| A3 | Readiness | `curl -s localhost:8000/ready` | `"ready"`, both targets `reachable`, `api_key: valid` |
+| A3 | Readiness | `curl -s localhost:8000/ready` | `"ready"`, both targets `reachable`, `api_key` = `keygen` or `static` (auth mode only; `/ready` never generates keys, so key health shows in the worker log: "API key validated" at startup, no "Permanent auth failure") |
 | A4 | Last reboot / kernel | `last reboot \| head -3` | Expected patch-window reboot; services came back on their own |
 
 ### B. Is it keeping up?

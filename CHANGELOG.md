@@ -4,6 +4,7 @@
 
 ### Fixed
 - **403 "User not authorized to perform this operation." is now retried instead of dead-lettered** (2026-11-24). From Sep to Nov it caused about 5× the summer DLQ rate (120 batches, 302 logins lost). It shows up in the same second as the commit-window 403 "not authorized for user role", often on both firewalls at once, and clears by the next batch. Both messages are matched in the reason phrase or the body (`is_transient_403()`). A persistent 403 still dead-letters after the normal retries. The permanent-failure log line now includes the reason phrase and body
+- **`/ready` no longer generates PA API keys** (2026-11-24). In keygen mode, each uvicorn process ran a keygen for the shared `PA_USERNAME` account on its first `/ready` call. That briefly invalidated the worker's key: on Nov 24 a `/ready` keygen was followed 54 ms later by a worker 403. `api_key` now reports the configured auth mode (`static` / `keygen`) instead of `valid`
 
 ### Ops
 - **2026-11-24 — journald made persistent** (`deploy/journald-mist-userid.conf` → `/etc/systemd/journald.conf.d/`): it was RAM-only and held about 8 hours. Now capped at 1G (about 4–5 days), because `/var/log` is a separate 5G volume shared with rsyslog

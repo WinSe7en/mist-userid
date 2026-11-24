@@ -661,7 +661,7 @@ sudo systemctl status mist-userid-worker --no-pager
 # 2. Application health (is the API running? version?)
 curl -s http://localhost:8000/health
 
-# 3. Readiness (Redis + PA targets reachable, API key valid?)
+# 3. Readiness (Redis + PA targets reachable; api_key shows auth mode, not key validity)
 curl -s http://localhost:8000/ready | python3 -m json.tool
 
 # 4. Queue depth (should be 0 or near 0; >100 means worker is behind)

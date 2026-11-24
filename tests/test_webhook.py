@@ -30,6 +30,46 @@ async def test_ready_with_redis(client, fake_redis):
     assert "targets" in data
 
 
+def _mock_pa_client(mock_client_cls):
+    mock_client = AsyncMock()
+    mock_client.head = AsyncMock(return_value=httpx.Response(200))
+    mock_client.post = AsyncMock(return_value=httpx.Response(200))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client_cls.return_value = mock_client
+    return mock_client
+
+
+@pytest.mark.asyncio
+async def test_ready_never_generates_api_key(client, fake_redis, monkeypatch):
+    """/ready must not call keygen: a new key for the shared PA account briefly
+    breaks the worker's key (observed 2026-11-24, 403 within 54 ms)."""
+    monkeypatch.setenv("PA_API_KEY", "")
+    monkeypatch.setenv("PA_USERNAME", "svc")
+    monkeypatch.setenv("PA_PASSWORD", "secret")
+    from app import config
+    config._settings = None
+
+    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
+        mock_client = _mock_pa_client(mock_client_cls)
+        resp = await client.get("/ready")
+
+    mock_client.post.assert_not_called()
+    data = resp.json()
+    assert data["status"] == "ready"
+    assert data["api_key"] == "keygen"
+
+
+@pytest.mark.asyncio
+async def test_ready_reports_static_key_mode(client, fake_redis):
+    with patch("app.main.httpx.AsyncClient") as mock_client_cls:
+        mock_client = _mock_pa_client(mock_client_cls)
+        resp = await client.get("/ready")
+
+    mock_client.post.assert_not_called()
+    assert resp.json()["api_key"] == "static"
+
+
 @pytest.mark.asyncio
 async def test_ready_reports_unreachable_target(client, fake_redis):
     with patch("app.main.httpx.AsyncClient") as mock_client_cls:

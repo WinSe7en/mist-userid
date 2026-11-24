@@ -9,7 +9,6 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app import __version__
 from app.config import get_settings
 from app.logging_config import configure_logging
-from app.pa_auth import get_api_key
 from app.redis_client import close_redis, get_redis
 from app.webhook import router as webhook_router
 
@@ -45,7 +44,10 @@ async def ready():
     settings = get_settings()
     errors = []
     targets_status = {}
-    api_key_status = "unknown"
+    # Report the configured auth mode only. Never call keygen here: generating a
+    # new key for the shared PA account briefly invalidates the worker's key and
+    # its next request gets a 403. Config validation guarantees one mode is set.
+    api_key_status = "static" if settings.pa_api_key else "keygen"
 
     try:
         r = await get_redis()
@@ -57,14 +59,6 @@ async def ready():
         timeout=httpx.Timeout(5.0, connect=3.0),
         verify=settings.pa_verify_ssl,
     ) as client:
-        # Verify API key is obtainable (static or generatable)
-        try:
-            await get_api_key(client)
-            api_key_status = "valid"
-        except Exception as e:
-            api_key_status = f"error: {e}"
-            errors.append(f"api_key: {e}")
-
         for target in settings.pa_target_list:
             try:
                 await client.head(target, follow_redirects=False)
