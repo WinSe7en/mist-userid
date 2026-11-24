@@ -98,7 +98,7 @@ LOGS="$(ls /var/log/messages* | tr '\n' ' ')"
 | # | Check | Command | Healthy |
 |---|-------|---------|---------|
 | B1 | Queue depth | `redis-cli LLEN userid_queue` | `0` (brief spikes <100 fine) |
-| B2 | Webhook volume (24h) | `sudo journalctl -u mist-userid-api --since "24 hours ago" -q \| grep -c "POST /mist/webhook"` | ~190–200K/day (Nov 2026 baseline); big drop = Mist webhook problem (procedure 4) |
+| B2 | Webhook volume (yesterday, full day) | `sudo grep -c "^$(date -d yesterday '+%b %e') .*POST /mist/webhook" /var/log/messages*` | ~490–530K/day, about 6/sec (Nov 2026 baseline). Big drop = Mist webhook problem (procedure 4). Earlier "~200K/day" figures were journald's ~8-hour window, not a full day |
 | B3 | Stale / rejected events | `sudo grep -hc "stale event" $LOGS`; `sudo grep -hci "queue full\|signature validation failed" $LOGS` | All `0` |
 | B4 | Memory vs limits | `systemctl show mist-userid-api mist-userid-worker -p MemoryCurrent,MemoryPeak` | API ~230–250MB (limit 512M), worker ~75–90MB (limit 256M); flat over time = no leak |
 
