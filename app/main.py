@@ -1,10 +1,11 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import PlainTextResponse
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_latest, multiprocess
 
 from app import __version__
 from app.config import get_settings
@@ -72,9 +73,23 @@ async def ready():
     return {"status": "ready", "targets": targets_status, "api_key": api_key_status}
 
 
+def render_metrics() -> bytes:
+    """Prometheus text for the API.
+
+    uvicorn runs several worker processes; with PROMETHEUS_MULTIPROC_DIR set
+    (see mist-userid-api.service) each writes its counters there and this sums
+    them, so a scrape reflects all processes rather than whichever answered.
+    """
+    if os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        return generate_latest(registry)
+    return generate_latest()
+
+
 @app.get("/metrics")
 async def metrics():
     return PlainTextResponse(
-        content=generate_latest(),
+        content=render_metrics(),
         media_type=CONTENT_TYPE_LATEST,
     )

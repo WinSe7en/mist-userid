@@ -28,5 +28,11 @@ LockPersonality=yes
 # Environment
 EnvironmentFile=/etc/mist-userid/env
 
+# Prometheus multiprocess mode: each uvicorn process writes its counters here
+# and /metrics sums them. systemd creates the directory empty on every start
+# and removes it on stop, which is what prometheus_client requires.
+RuntimeDirectory=mist-userid-api-metrics
+Environment=PROMETHEUS_MULTIPROC_DIR=/run/mist-userid-api-metrics
+
 [Install]
 WantedBy=multi-user.target

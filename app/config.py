@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     ignore_ssids: str = ""
     max_queue_depth: int = 10000
     webhook_max_age: int = 300  # seconds; reject events older than this
+    worker_metrics_port: int = 9101  # worker /metrics on 127.0.0.1; 0 disables
     # Break-glass for PA cert incidents ONLY (see runbook); never leave false
     pa_verify_ssl: bool = True
 

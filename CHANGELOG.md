@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- **`/metrics` now shows the whole service** ([#1](https://github.com/WinSe7en/mist-userid/issues/1)). Worker metrics (PA requests and latency, batches, processed, dedup, DLQ, queue depth) were recorded in the worker process but never served, so they were missing or stuck at 0. The worker now serves them on `127.0.0.1:9101` (`WORKER_METRICS_PORT`, `0` disables) from its own registry, in the new `app/worker_metrics.py`. The API's counters are summed across all 4 uvicorn processes using Prometheus multiprocess mode (`PROMETHEUS_MULTIPROC_DIR` on a systemd `RuntimeDirectory`). Before, each scrape returned one process's counts. Zabbix items `events.deduped`, `dlq.total` and `queue.gauge` now read the worker endpoint, and `pa.requests[<status>]` is new
+- `asyncio_default_fixture_loop_scope` moved to `pytest.ini`, which takes precedence over `pyproject.toml`; the setting added in 0.4.0 was never read
+
 ### Added
 - **`scripts/replay_dlq.py`**: replays recent dead-lettered batches through the service's own sender (configured timeout, retries, transient-403 handling; a batch that fails again returns to the DLQ). Replays only entries under `--max-age` (default 300s), leaves older ones in place, and supports `--dry-run`. Replaces the README's copy-paste retry script, which required a static `PA_API_KEY` and hardcoded a 60-minute timeout
 
@@ -146,7 +150,7 @@
 - ~~**Verify `userid_timeout` (60 min)**~~ — Done 2026-03-06: increased to 360 min (6 hrs); balances student DHCP lease (16 hrs) vs faculty/staff lease (2 hrs); faculty/staff stale window acceptable given AD User-ID as primary source; logout events still clean up immediately on disconnect
 - ~~**Sanitize repo data (public GitHub repo!)**~~ — Done 2026-09-03: full sweep of usernames, UUIDs, MACs, hostnames, IPs, and building names, including git history rewrite with `git filter-repo` (see [Unreleased] Security note)
 - ~~**Update documentation and requirements**~~ — Done 2026-09-03: requirements floors bumped to tested 3.12 baseline, pip-audit run (2 CVEs fixed, prod patched), README/SPEC aligned (PA_VERIFY_SSL, cert-check timer, watchdog heartbeat), CI matrix fixed (3.9/3.10 dropped)
-- **Fix `/metrics`** ([#1](https://github.com/WinSe7en/mist-userid/issues/1)) — worker metrics aren't exported and API counters cover one of 4 processes per scrape; do before or with the Zabbix template import
+- ~~**Fix `/metrics`**~~ ([#1](https://github.com/WinSe7en/mist-userid/issues/1)) — Done 2026-11-24. The agent-side UserParameters (`sudo make zabbix`) are still not installed on the production host; do that with the template import
 - **DLQ replay mechanism** — manual part done 2026-11-24 (`scripts/replay_dlq.py`, replays entries under 5 min old). Still open: automatic replay by the worker once PA recovers, since a manual replay only helps if someone runs it within minutes
 - **Periodic mapping refresh** — users stationary on one AP for >8 hrs (overnight residential, all-day office) will fall out of PA table; extend building onboarding script to run on a schedule (every ~7 hrs) querying Mist API for connected clients and re-pushing their mappings
 - ~~**Write runbook/SOP**~~ — Done 2026-03-11: `docs/runbook.md` covering DLQ, stale event spikes, PA auth failures, webhook reset, building onboarding, service won't start, high queue depth, key config reference, and known issues history

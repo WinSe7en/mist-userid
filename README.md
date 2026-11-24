@@ -128,6 +128,7 @@ All configuration is via environment variables (set in `/etc/mist-userid/env`):
 | `IGNORE_SSIDS` | No | *(empty)* | Comma-separated SSIDs to ignore (case-insensitive) |
 | `MAX_QUEUE_DEPTH` | No | `10000` | Reject webhooks with 429 when queue reaches this depth |
 | `WEBHOOK_MAX_AGE` | No | `300` | Reject events with timestamps older than this many seconds |
+| `WORKER_METRICS_PORT` | No | `9101` | Worker Prometheus metrics on 127.0.0.1; `0` disables |
 
 ### Multi-Target Example
 
@@ -243,9 +244,14 @@ The API service exposes metrics via the `/metrics` endpoint in Prometheus format
 | `mist_userid_dlq_events_total` | Counter | - | Batches moved to the dead-letter queue |
 | `mist_userid_queue_depth` | Gauge | - | Current Redis queue size |
 
-**Known limitations of `/metrics` (as of v0.4.0):**
-- **Worker metrics are not exported.** `processed`, `batch_*`, `pa_request*` and `dlq_events` are recorded inside the worker process, which serves no endpoint. On the API's `/metrics` they are absent, or registered but stuck at 0 (`dlq_events_total`). For worker health use the logs and Redis (`LLEN userid_queue`, `LLEN userid_dlq`).
-- **API counters cover one process per scrape.** uvicorn runs 4 processes without Prometheus multiprocess mode, so each scrape returns the counters of whichever process answered (about a quarter of the traffic, reset when that process restarts). Use them for rates and trends, not totals. For daily volume, count webhook log lines (see `docs/runbook.md`, check B2).
+**Two endpoints.** Metrics are served by the process that records them:
+
+| Endpoint | Serves | Metrics |
+|----------|--------|---------|
+| `http://localhost:8000/metrics` (API) | Webhook intake | `events_received`, `events_queued`, `events_rejected`, `webhook_queue_full` |
+| `http://127.0.0.1:9101/metrics` (worker, `WORKER_METRICS_PORT`) | Delivery to PA | `events_deduped`, `events_invalid_username`, `events_processed`, `batch_*`, `pa_requests`, `pa_request_duration_seconds`, `dlq_events`, `queue_depth`, plus `process_*` (worker memory/CPU) |
+
+The worker endpoint binds to 127.0.0.1 only. The API's counters are summed across all 4 uvicorn processes (Prometheus multiprocess mode, via `PROMETHEUS_MULTIPROC_DIR` in `mist-userid-api.service`). All counters reset when their service restarts.
 
 ### Prometheus
 
@@ -259,6 +265,8 @@ scrape_configs:
     metrics_path: /metrics
     scrape_interval: 30s
 ```
+
+The worker endpoint listens on 127.0.0.1:9101 only. To scrape it from a remote Prometheus, run a local agent or proxy on the host rather than binding it to a public interface.
 
 ### Zabbix
 
@@ -288,7 +296,7 @@ This copies the config to `/etc/zabbix/zabbix_agentd.d/` (or `zabbix_agent2.d/`)
 | Memory | API service memory, Worker service memory |
 | Certificates | Days until each PA certificate expires: `mist.userid.cert.days[<pa-host>]` (UserParameter; add an item per firewall) |
 
-Health, queue depth, DLQ depth and memory items read systemd and Redis directly, so the triggers below are reliable. The event items read `/metrics` and inherit its limits (see [Available Metrics](#available-metrics)): event rates cover one API process per poll, and `events.deduped`, `dlq.total` and `queue.gauge` read worker metrics that aren't exported, so they stay at 0. Use `dlq.depth` and `queue.depth` instead.
+Health, queue depth, DLQ depth and memory items read systemd and Redis directly. Event items read the API's `/metrics`; `events.deduped`, `dlq.total`, `queue.gauge` and `pa.requests[<status>]` read the worker's endpoint on 127.0.0.1:9101 (see [Available Metrics](#available-metrics)). `pa.requests[failure]` is a useful extra trigger: it rises before a batch is dead-lettered.
 
 Until the template is imported and linked, nothing alerts: problems such as an expiring certificate only appear in the logs.
 
@@ -503,8 +511,11 @@ curl -s http://localhost:8000/metrics | grep events_rejected_total
 # Queue-full rejections — if this is non-zero, the worker can't keep up with the webhook rate
 curl -s http://localhost:8000/metrics | grep webhook_queue_full_total
 
-# PA API problems (retries, timeouts, 403s) — worker metrics aren't exported, so use the log
-sudo journalctl -u mist-userid-worker --since "1 hour ago" | grep -E "retry|Permanent|Max retries"
+# PA API requests by status (retry/failure climbing = PA slow, WAN issue, or account conflict)
+curl -s http://127.0.0.1:9101/metrics | grep pa_requests_total
+
+# PA API latency (p99 climbing = PA under load or WAN issues)
+curl -s http://127.0.0.1:9101/metrics | grep pa_request_duration
 ```
 
 ### Capacity Thresholds
@@ -513,7 +524,8 @@ sudo journalctl -u mist-userid-worker --since "1 hour ago" | grep -E "retry|Perm
 |--------|---------|-------------|--------|
 | Queue depth | 0–10 | 10–500 | >500: worker falling behind |
 | `webhook_queue_full_total` | 0 | Any | Worker can't drain queue; see below |
-| PA retries in worker log | Occasional | Several per hour | Sustained: PA overloaded, WAN issue, or account conflict |
+| PA request latency (p99) | <1s | 1–5s | >5s: PA overloaded or WAN issue |
+| `pa_requests_total{status="retry"}` | Occasional | Several per hour | Sustained: PA overloaded, WAN issue, or account conflict |
 | API memory | <300MB | 300–400MB | >400MB: reduce `--workers` count |
 | Worker memory | <150MB | 150–200MB | >200MB: check for batch accumulation |
 

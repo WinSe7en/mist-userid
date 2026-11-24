@@ -7,9 +7,9 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 import httpx
 
 from app.config import get_settings
-from app.metrics import DLQ_EVENTS, PA_REQUEST_DURATION, PA_REQUESTS
 from app.pa_auth import get_api_key, invalidate_api_key
 from app.redis_client import get_redis
+from app.worker_metrics import DLQ_EVENTS, PA_REQUEST_DURATION, PA_REQUESTS
 
 logger = logging.getLogger(__name__)
 

@@ -6,24 +6,26 @@ import time
 
 import httpx
 import sdnotify
+from prometheus_client import start_http_server
 from redis.exceptions import RedisError
 
 from app.config import get_settings
 from app.dedup import is_duplicate
 from app.logging_config import configure_logging
-from app.metrics import (
+from app.pa_auth import get_api_key
+from app.paloalto import send_batch
+from app.redis_client import close_redis, get_redis
+from app.utils import sanitize_username
+from app.webhook import QUEUE_KEY
+from app.worker_metrics import (
     BATCH_FLUSHES,
     BATCH_SIZE,
     EVENTS_DEDUPED,
     EVENTS_INVALID_USERNAME,
     EVENTS_PROCESSED,
     QUEUE_DEPTH,
+    WORKER_REGISTRY,
 )
-from app.pa_auth import get_api_key
-from app.paloalto import send_batch
-from app.redis_client import close_redis, get_redis
-from app.utils import sanitize_username
-from app.webhook import QUEUE_KEY
 
 logger = logging.getLogger(__name__)
 notifier = sdnotify.SystemdNotifier()
@@ -60,6 +62,18 @@ async def watchdog_heartbeat() -> None:
         await asyncio.sleep(WATCHDOG_INTERVAL)
 
 
+def start_metrics_server(port: int):
+    """Serve worker metrics on 127.0.0.1:<port> in a background thread.
+
+    Localhost only: scraped by the local Zabbix agent, never exposed. Returns
+    the HTTP server (for shutdown in tests), or None when disabled (port 0).
+    """
+    if port <= 0:
+        return None
+    server, _thread = start_http_server(port, addr="127.0.0.1", registry=WORKER_REGISTRY)
+    return server
+
+
 def validate_username(username) -> tuple[bool, str]:
     """Validate username before XML construction.
 
@@ -89,6 +103,15 @@ async def run_worker() -> None:
             "PA TLS certificate verification is DISABLED (PA_VERIFY_SSL=false) "
             "— break-glass mode for cert incidents; re-enable after renewal"
         )
+
+    try:
+        if start_metrics_server(settings.worker_metrics_port):
+            logger.info("Worker metrics on http://127.0.0.1:%d/metrics",
+                        settings.worker_metrics_port)
+    except OSError as e:
+        # Metrics are diagnostics; never let a port clash stop mapping delivery
+        logger.error("Worker metrics endpoint not started (port %d): %s",
+                     settings.worker_metrics_port, e)
 
     shutdown_event = asyncio.Event()
 

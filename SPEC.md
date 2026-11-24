@@ -170,6 +170,7 @@ async def worker():
 | `IGNORE_SSIDS` | Comma-separated SSIDs to ignore (case-insensitive) | *(empty)* |
 | `MAX_QUEUE_DEPTH` | Reject webhooks with 429 when queue reaches this depth | `10000` |
 | `WEBHOOK_MAX_AGE` | Reject events with timestamps older than this many seconds | `300` |
+| `WORKER_METRICS_PORT` | Worker Prometheus metrics on 127.0.0.1 (`0` disables) | `9101` |
 
 ## Graceful Shutdown & Watchdog
 - Worker catches `SIGTERM` and flushes the current batch before exiting
