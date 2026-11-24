@@ -103,6 +103,8 @@ Instead of a static API key, you can provide admin credentials and the service w
 
 The key is generated once at startup, cached in memory, and auto-refreshes if it becomes invalid (e.g., after a password change). This is useful for environments where API keys shouldn't be stored in config files.
 
+**Use a dedicated account for this service.** Any other login or keygen for the same account (a script, another integration, an admin using it in the GUI) briefly invalidates the service's key, and requests in that window get a 403 or a session-expired response. The service retries these, but a shared account turns them into a regular occurrence. See [PAN-OS API Behaviors](#pan-os-api-behaviors).
+
 ## Configuration Reference
 
 All configuration is via environment variables (set in `/etc/mist-userid/env`):
@@ -214,7 +216,9 @@ Both services:
 | Endpoint | Purpose | Success |
 |----------|---------|---------|
 | `GET /health` | Liveness — app is running | `{"status": "ok"}` |
-| `GET /ready` | Readiness — Redis + PA targets reachable | `{"status": "ready", "targets": {...}}` |
+| `GET /ready` | Readiness — Redis + PA targets reachable | `{"status": "ready", "targets": {...}, "api_key": "keygen"}` |
+
+`api_key` reports the configured auth mode (`static` or `keygen`), not whether the key works: `/ready` never generates a key, because doing so briefly invalidates the worker's key. Key health shows in the worker log ("API key validated" at startup, no "Permanent auth failure" lines).
 | `GET /metrics` | Prometheus metrics (text format) | Counters, histograms, gauges |
 
 ## Monitoring
@@ -227,10 +231,21 @@ The API service exposes metrics via the `/metrics` endpoint in Prometheus format
 |--------|------|--------|-------------|
 | `mist_userid_events_received_total` | Counter | `topic` | Webhook events received (by topic) |
 | `mist_userid_events_queued_total` | Counter | - | Events added to Redis queue |
-| `mist_userid_events_rejected_total` | Counter | `reason` | Rejected events (no_username, no_ip, ignored_ssid) |
+| `mist_userid_events_rejected_total` | Counter | `reason` | Events rejected by the API: `no_username`, `no_ip`, `invalid_ip`, `invalid_username`, `ignored_ssid`, `stale_event`, `malformed_event` |
+| `mist_userid_webhook_queue_full_total` | Counter | - | Webhooks rejected with 429 because the queue hit `MAX_QUEUE_DEPTH` |
 | `mist_userid_events_deduped_total` | Counter | - | Duplicate events skipped by cache |
-| `mist_userid_dlq_events_total` | Counter | - | Events moved to dead-letter queue |
+| `mist_userid_events_invalid_username_total` | Counter | `reason` | Events dropped by the worker for an unusable username |
+| `mist_userid_events_processed_total` | Counter | `action` | Events added to a batch (`login` / `logout`) |
+| `mist_userid_batch_flushes_total` | Counter | `trigger` | Batches sent (`size` / `timer` / `shutdown`) |
+| `mist_userid_batch_size` | Histogram | - | Entries per batch |
+| `mist_userid_pa_requests_total` | Counter | `target`, `status` | PA API requests (`success` / `retry` / `failure`) |
+| `mist_userid_pa_request_duration_seconds` | Histogram | `target` | PA API request latency |
+| `mist_userid_dlq_events_total` | Counter | - | Batches moved to the dead-letter queue |
 | `mist_userid_queue_depth` | Gauge | - | Current Redis queue size |
+
+**Known limitations of `/metrics` (as of v0.4.0):**
+- **Worker metrics are not exported.** `processed`, `batch_*`, `pa_request*` and `dlq_events` are recorded inside the worker process, which serves no endpoint. On the API's `/metrics` they are absent, or registered but stuck at 0 (`dlq_events_total`). For worker health use the logs and Redis (`LLEN userid_queue`, `LLEN userid_dlq`).
+- **API counters cover one process per scrape.** uvicorn runs 4 processes without Prometheus multiprocess mode, so each scrape returns the counters of whichever process answered (about a quarter of the traffic, reset when that process restarts). Use them for rates and trends, not totals. For daily volume, count webhook log lines (see `docs/runbook.md`, check B2).
 
 ### Prometheus
 
@@ -271,6 +286,11 @@ This copies the config to `/etc/zabbix/zabbix_agentd.d/` (or `zabbix_agent2.d/`)
 | Queues | Queue depth, DLQ depth, Dedup cache size |
 | Events | Received, queued, rejected, deduped (totals + rates) |
 | Memory | API service memory, Worker service memory |
+| Certificates | Days until each PA certificate expires: `mist.userid.cert.days[<pa-host>]` (UserParameter; add an item per firewall) |
+
+Health, queue depth, DLQ depth and memory items read systemd and Redis directly, so the triggers below are reliable. The event items read `/metrics` and inherit its limits (see [Available Metrics](#available-metrics)): event rates cover one API process per poll, and `events.deduped`, `dlq.total` and `queue.gauge` read worker metrics that aren't exported, so they stay at 0. Use `dlq.depth` and `queue.depth` instead.
+
+Until the template is imported and linked, nothing alerts: problems such as an expiring certificate only appear in the logs.
 
 **Triggers:**
 
@@ -397,53 +417,20 @@ Each DLQ entry is JSON:
 - **Recent failures (< 5 minutes)**: Worth retrying — the user-IP mappings are still valid
 - **Stale failures (hours/days old)**: Usually not worth retrying — IPs may have been reassigned via DHCP, and logout targets may have already timed out on the PA
 
-### Manual Retry Script
+### Replaying the DLQ
 
-Save as `/opt/mist-userid/retry_dlq.py`:
+`scripts/replay_dlq.py` resends recent entries using the service's own sender, so replays get the configured `USERID_TIMEOUT`, retries, transient-403 handling and key refresh. It reads `/etc/mist-userid/env` itself. Entries older than `--max-age` (default 300s) are left in the DLQ untouched; a batch that fails again goes back into the DLQ.
 
-```python
-import asyncio, json, redis, httpx, os
-from xml.etree.ElementTree import Element, SubElement, tostring
-
-def build_xml(logins, logouts, timeout=60):
-    msg = Element("uid-message")
-    SubElement(msg, "type").text = "update"
-    payload = SubElement(msg, "payload")
-    if logins:
-        el = SubElement(payload, "login")
-        for user, ip in logins:
-            SubElement(el, "entry", name=user, ip=ip, timeout=str(timeout))
-    if logouts:
-        el = SubElement(payload, "logout")
-        for user, ip in logouts:
-            SubElement(el, "entry", name=user, ip=ip)
-    return tostring(msg, encoding="unicode")
-
-async def retry():
-    r = redis.Redis(decode_responses=True)
-    print(f"DLQ has {r.llen('userid_dlq')} entries")
-    ok = fail = 0
-    async with httpx.AsyncClient(timeout=30, verify=True) as c:
-        while (entry := r.rpop("userid_dlq")):
-            d = json.loads(entry)
-            xml = build_xml(d.get("logins",[]), d.get("logouts",[]))
-            for target in d["targets"]:
-                try:
-                    resp = await c.post(f"{target}/api/",
-                        data={"type":"user-id","key":os.environ["PA_API_KEY"],"cmd":xml})
-                    if "success" in resp.text: ok += 1
-                    else: fail += 1; print(f"✗ {target}: {resp.text[:80]}")
-                except Exception as e: fail += 1; print(f"✗ {target}: {e}")
-    print(f"Done: {ok} ok, {fail} failed")
-
-asyncio.run(retry())
-```
-
-Run with:
 ```bash
-sudo bash -c 'export $(grep -v "^#" /etc/mist-userid/env | xargs) && \
-  /opt/mist-userid/venv/bin/python /opt/mist-userid/retry_dlq.py'
+cd /opt/mist-userid
+sudo venv/bin/python scripts/replay_dlq.py --dry-run          # what would be replayed
+sudo venv/bin/python scripts/replay_dlq.py                    # replay entries < 5 min old
+sudo venv/bin/python scripts/replay_dlq.py --max-age 900      # widen the window
 ```
+
+Each replay resends the batch to every configured target, including any that accepted it the first time. That's harmless: a repeated login just refreshes the mapping's timeout, and a repeated logout returns PAN-OS's benign "Delete mapping failed".
+
+In keygen mode the script generates its own API key once. That briefly invalidates the worker's key, which the worker absorbs with a retry (a "Commit-window 403" or "Regenerated API key" line in its log is expected).
 
 ### Clearing the DLQ
 
@@ -516,8 +503,8 @@ curl -s http://localhost:8000/metrics | grep events_rejected_total
 # Queue-full rejections — if this is non-zero, the worker can't keep up with the webhook rate
 curl -s http://localhost:8000/metrics | grep webhook_queue_full_total
 
-# PA API latency (p99 latency climbing = PA is under load or WAN issues)
-curl -s http://localhost:8000/metrics | grep pa_request_duration
+# PA API problems (retries, timeouts, 403s) — worker metrics aren't exported, so use the log
+sudo journalctl -u mist-userid-worker --since "1 hour ago" | grep -E "retry|Permanent|Max retries"
 ```
 
 ### Capacity Thresholds
@@ -526,13 +513,13 @@ curl -s http://localhost:8000/metrics | grep pa_request_duration
 |--------|---------|-------------|--------|
 | Queue depth | 0–10 | 10–500 | >500: worker falling behind |
 | `webhook_queue_full_total` | 0 | Any | Worker can't drain queue; see below |
-| PA request latency (p99) | <1s | 1–5s | >5s: PA overloaded or WAN issue |
+| PA retries in worker log | Occasional | Several per hour | Sustained: PA overloaded, WAN issue, or account conflict |
 | API memory | <300MB | 300–400MB | >400MB: reduce `--workers` count |
 | Worker memory | <150MB | 150–200MB | >200MB: check for batch accumulation |
 
 ### What Happens at Scale
 
-**At current scale (~1 building):** The architecture has significant headroom. A typical Mist campus event arrives at 1–10 events/sec per building. The worker drains the queue faster than events arrive.
+**Measured load (November 2026, multi-building production):** about 490–530K webhooks per day, roughly 6 per second on average, with the queue at 0, API memory around 220–250MB and the worker under 100MB. The architecture still has significant headroom: the worker drains the queue faster than events arrive.
 
 **As buildings are added:** Each building adds roughly proportional event volume. The bottleneck order is:
 1. **PA API throughput** — batch size (50 events) and flush interval (2s) control how many XML requests/sec go to PA. If PA is slow, the worker accumulates a backlog.
@@ -651,7 +638,7 @@ Day-to-day commands for managing the service without any external tools.
 
 ### Full Health Check
 
-Run all of these to get a complete picture of service health:
+For the complete monthly review (DLQ rate and cause, certificate expiry, Redis persistence, disk, dependency audit, and what "healthy" looks like for each), use the **Periodic Health Review Checklist** in [`docs/runbook.md`](docs/runbook.md). The commands below are the quick spot-check:
 
 ```bash
 # 1. Service status (are both processes running?)
@@ -800,14 +787,15 @@ When code changes are made in the git repository:
 
 ```bash
 # 1. Pull latest code
-cd /home/matt.johnson.03/projects/mist-userid
+cd ~/projects/mist-userid    # your checkout
 git pull
 
-# 2. Run tests
-python3 -m pytest -v
+# 2. Run tests (use the same Python as production; on RHEL 9 plain `python3` is 3.9 and can't run this code)
+python3.12 -m pytest -v
 
-# 3. Copy updated app files to production
+# 3. Copy updated app files and scripts to production
 sudo cp app/*.py /opt/mist-userid/app/
+sudo install -m 0755 scripts/* /opt/mist-userid/scripts/
 
 # 4. If systemd unit files changed (CapabilityBoundingSet, hardening directives, etc.)
 sudo cp deploy/mist-userid-api.service deploy/mist-userid-worker.service /etc/systemd/system/
@@ -844,11 +832,29 @@ redis-cli LLEN userid_dlq
 | `deploy/mist-userid-*.service` | `daemon-reload` + restart both |
 | `deploy/nginx-mist-userid.conf` | `nginx -t && systemctl reload nginx` |
 | `deploy/env.example` | No action (template only; edit `/etc/mist-userid/env` manually if needed) |
+| `scripts/*` | Copy to `/opt/mist-userid/scripts/`; no restart |
+| `requirements.txt` | Upgrade the venv (below), then restart both |
+
+**Upgrading dependencies** (after `requirements.txt` changes and tests pass locally on the new versions):
+
+```bash
+# Save the current package set so you can roll back
+/opt/mist-userid/venv/bin/pip freeze > ~/prod-venv-freeze-$(date +%F).txt
+
+sudo /opt/mist-userid/venv/bin/pip install --upgrade -r requirements.txt
+/opt/mist-userid/venv/bin/pip check          # should print "No broken requirements found."
+sudo systemctl restart mist-userid-api mist-userid-worker
+
+# Roll back if needed
+sudo /opt/mist-userid/venv/bin/pip install -r ~/prod-venv-freeze-<date>.txt
+```
+
+`--upgrade -r` only upgrades packages listed in `requirements.txt`; indirect ones (pydantic, anyio, hiredis) stay put if they still satisfy their minimums. If you tested against newer indirect versions, install those exact versions too.
 
 **Full redeploy** (new dependencies, systemd changes, etc.):
 
 ```bash
-cd /home/matt.johnson.03/projects/mist-userid
+cd ~/projects/mist-userid
 sudo make update    # copies app/ files and updates pip packages
 sudo make deploy    # full redeploy (systemd units, nginx, SELinux, firewall)
 ```
@@ -868,7 +874,7 @@ curl -s http://localhost:8000/ready | python3 -m json.tool
 
 ### Memory Usage Growing
 - Check `systemctl status mist-userid-worker` for current memory
-- Normal usage: API ~100MB, Worker ~40-50MB
+- Normal usage (Python 3.12, ~500K webhooks/day): API ~220–250MB, Worker ~45–90MB. A flat line over days is normal; steady growth is not
 - systemd `MemoryMax` kills and auto-restarts the process if limits are exceeded (API: 512MB, Worker: 256MB)
 - If memory grows steadily, check queue depth — a backlog can cause batch accumulation
 
@@ -886,16 +892,26 @@ WARNING: Session expired on https://pan03... (HTTP 200 but XML unauth)
 INFO: Regenerated API key after session timeout, retrying https://pan03...
 ```
 
-### Commit-Window 403
+### Transient 403s ("Commit-Window 403")
 
-During PAN-OS auto-commits (or manual commits), the firewall temporarily returns HTTP 403 with "Type [user-id] not authorized for user role." This is transient — the user-id API role is briefly unavailable during the commit. The service retries with exponential backoff (1s, 2s, 4s...) until the commit completes.
+The firewall sometimes returns HTTP 403 for a fraction of a second with one of two messages:
+
+- "Type [user-id] not authorized for user role."
+- "User not authorized to perform this operation." (often only in the HTTP status line, not the body)
+
+Both clear by the next request, so the service retries them with exponential backoff (1s, 2s, 4s...) instead of dead-lettering. Before v0.4.0 the second message was treated as permanent; from Sep to Nov 2026 it caused most dead-lettered batches.
+
+Known causes:
+- **Commits** (auto or manual) briefly make the user-id API role unavailable.
+- **Another login or keygen for the same account** briefly invalidates the service's key. Reproduced on 2026-11-24: a keygen from another process was followed 54 ms later by this 403 on the worker. This is why the service needs a [dedicated account](#option-2-admin-credentials-auto-generate-key) and why `/ready` never generates keys.
+- **An hourly event tied to the account.** In production these 403s fell on a clock that repeats every hour, drifting a few seconds per hour, often on both firewalls in the same second. If you see that pattern, check the firewall System log for authentication events for the service account at those times.
 
 **What you'd see in logs:**
 ```
-WARNING: Commit-window 403 from https://pan03..., retry 1/5 in 1s
+WARNING: Commit-window 403 from https://pan03..., retry 1/5 in 1s: User not authorized to perform this operation.
 ```
 
-If you see persistent 403 errors (not during commits), check that the service account has User-ID Agent / XML API permissions on the PA.
+If 403s persist through all retries, the batch is dead-lettered with "Permanent auth failure" and the full PAN-OS message. Check that the service account still has User-ID Agent / XML API permissions on the PA.
 
 ### Benign Logout Failures ("Delete mapping failed")
 
@@ -1069,7 +1085,7 @@ Once in the three-server state, deploy updates without dropping a single webhook
 #    F5 routes all traffic to server 2
 
 # 2. Update server 1
-cd /home/matt.johnson.03/projects/mist-userid
+cd ~/projects/mist-userid    # your checkout
 git pull
 sudo cp app/*.py /opt/mist-userid/app/
 sudo systemctl restart mist-userid-api mist-userid-worker

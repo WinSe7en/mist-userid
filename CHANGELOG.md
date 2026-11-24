@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+- **`scripts/replay_dlq.py`**: replays recent dead-lettered batches through the service's own sender (configured timeout, retries, transient-403 handling; a batch that fails again returns to the DLQ). Replays only entries under `--max-age` (default 300s), leaves older ones in place, and supports `--dry-run`. Replaces the README's copy-paste retry script, which required a static `PA_API_KEY` and hardcoded a 60-minute timeout
+
+### Docs
+- README brought up to date: dedicated-account warning for keygen mode, `/ready` `api_key` field, full metrics table, the known `/metrics` limits (worker metrics not exported; API counters cover one of 4 processes per scrape, which also leaves three Zabbix event items stuck at 0), Zabbix certificate item, measured load (~500K webhooks/day), current memory baselines, both transient 403 messages and their known causes, dependency upgrade and rollback steps, `python3.12` for tests, no hardcoded home paths
+
 ## [0.4.0] - 2026-11-24
 
 ### Upgrade notes
@@ -140,7 +146,7 @@
 - ~~**Verify `userid_timeout` (60 min)**~~ — Done 2026-03-06: increased to 360 min (6 hrs); balances student DHCP lease (16 hrs) vs faculty/staff lease (2 hrs); faculty/staff stale window acceptable given AD User-ID as primary source; logout events still clean up immediately on disconnect
 - ~~**Sanitize repo data (public GitHub repo!)**~~ — Done 2026-09-03: full sweep of usernames, UUIDs, MACs, hostnames, IPs, and building names, including git history rewrite with `git filter-repo` (see [Unreleased] Security note)
 - ~~**Update documentation and requirements**~~ — Done 2026-09-03: requirements floors bumped to tested 3.12 baseline, pip-audit run (2 CVEs fixed, prod patched), README/SPEC aligned (PA_VERIFY_SSL, cert-check timer, watchdog heartbeat), CI matrix fixed (3.9/3.10 dropped)
-- **DLQ replay mechanism** — failed batches are currently lost; need a script or worker feature to retry DLQ entries after PA recovers
+- **DLQ replay mechanism** — manual part done 2026-11-24 (`scripts/replay_dlq.py`, replays entries under 5 min old). Still open: automatic replay by the worker once PA recovers, since a manual replay only helps if someone runs it within minutes
 - **Periodic mapping refresh** — users stationary on one AP for >8 hrs (overnight residential, all-day office) will fall out of PA table; extend building onboarding script to run on a schedule (every ~7 hrs) querying Mist API for connected clients and re-pushing their mappings
 - ~~**Write runbook/SOP**~~ — Done 2026-03-11: `docs/runbook.md` covering DLQ, stale event spikes, PA auth failures, webhook reset, building onboarding, service won't start, high queue depth, key config reference, and known issues history
 

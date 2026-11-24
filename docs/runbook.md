@@ -161,7 +161,13 @@ LOGS="$(ls /var/log/messages* | tr '\n' ' ')"
    ```
    Expected: XML response with PAN-OS version. Timeout or error = connectivity issue.
 
-3. If PA is reachable now, the DLQ entries represent a past outage window. The affected users will self-heal when they next roam or reconnect (generating a fresh event). Clear the DLQ:
+3. If PA is reachable now and the failures are **recent (under ~5 minutes)**, replay them. Older entries are left in place:
+   ```bash
+   cd /opt/mist-userid
+   sudo venv/bin/python scripts/replay_dlq.py --dry-run
+   sudo venv/bin/python scripts/replay_dlq.py
+   ```
+   For older entries, the mappings may be wrong after DHCP reassignment and the users will self-heal when they next roam or reconnect (generating a fresh event). Archive and clear the DLQ:
    ```bash
    redis-cli DEL userid_dlq
    ```
