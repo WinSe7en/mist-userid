@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-24
+
+### Upgrade notes
+- `/ready` field `api_key` now returns `static` or `keygen` instead of `valid`; anything matching on `valid` must change
+- Python 3.11+ required (production runs 3.12)
+
 ### Fixed
 - **403 "User not authorized to perform this operation." is now retried instead of dead-lettered** (2026-11-24). From Sep to Nov it caused about 5× the summer DLQ rate (120 batches, 302 logins lost). It shows up in the same second as the commit-window 403 "not authorized for user role", often on both firewalls at once, and clears by the next batch. Both messages are matched in the reason phrase or the body (`is_transient_403()`). A persistent 403 still dead-letters after the normal retries. The permanent-failure log line now includes the reason phrase and body
 - **`/ready` no longer generates PA API keys** (2026-11-24). In keygen mode, each uvicorn process ran a keygen for the shared `PA_USERNAME` account on its first `/ready` call. That briefly invalidated the worker's key: on Nov 24 a `/ready` keygen was followed 54 ms later by a worker 403. `api_key` now reports the configured auth mode (`static` / `keygen`) instead of `valid`
@@ -9,12 +15,14 @@
 ### Ops
 - **2026-11-24 — journald made persistent** (`deploy/journald-mist-userid.conf` → `/etc/systemd/journald.conf.d/`): it was RAM-only and held about 8 hours. Now capped at 1G (about 4–5 days), because `/var/log` is a separate 5G volume shared with rsyslog
 - `docs/runbook.md`: added the Periodic Health Review Checklist
+- **2026-06-10 — Python upgraded 3.9.21 → 3.12.13** (RHEL 9 app stream): production venv rebuilt at `/opt/mist-userid/venv`, all 104 tests pass, ~50s API downtime during cutover. Old venv kept at `/opt/mist-userid/venv-py39-old` for rollback; remove after a week of clean operation. Note: venvs are not relocatable (console-script shebangs bake in absolute paths) — always build at the final path.
 
 ### Added
 - **Daily PA cert expiry check**: `scripts/check_pa_certs.sh` + `mist-userid-certcheck.timer` (08:00 daily) — warns via journald/StellarCyber when a PA cert is within 30 days of expiry; would have prevented the May 2026 incident. Also exposes `mist.userid.cert.days[<host>]` Zabbix UserParameter
 - **`PA_VERIFY_SSL` break-glass option** (default `true`): temporarily disable PA TLS verification during a cert incident so mappings keep flowing while the cert is renewed; worker logs a WARNING at startup while disabled (see runbook)
 
 ### Changed
+- **Dependencies upgraded** (2026-11-24): fastapi 0.165 / starlette 1.10 / uvicorn 0.54 / redis 8.2 / pydantic 2.14 / pydantic-settings 2.16 / prometheus-client 0.26 / python-json-logger 4.2; test tooling fakeredis 2.41 (2.36 breaks with redis 8.2) / pytest 9.2 / pytest-asyncio 1.5. Production venv upgraded; previous package set saved for rollback. pip-audit clean
 - **Requirements refreshed to the tested Python 3.12 baseline** (2026-09-03): floors bumped in `requirements*.txt` and `pyproject.toml` to the versions running in production (fastapi 0.136 / uvicorn 0.49 / httpx 0.28 / redis 8.0 / prometheus-client 0.25 / python-json-logger 4.x); pip-audit clean
 - **CI fixed**: test matrix dropped Python 3.9/3.10 (red since the June 3.11+ modernization — those interpreters SyntaxError on modern typing syntax)
 - **Docs aligned with current architecture**: README/SPEC now document `PA_VERIFY_SSL`, the daily cert-check timer, and the dedicated 10s watchdog heartbeat task (SPEC previously described the old per-loop notify that caused the May crashes)
@@ -25,9 +33,6 @@
 ### Security
 - **2026-09-03 — Dependency audit (pip-audit)**: upgraded `pydantic-settings` ≥2.14.2 (GHSA-4xgf-cpjx-pc3j) and floored transitive `starlette` ≥1.3.1 (PYSEC-2026-248/249, multipart DoS on the public webhook endpoint); production venv upgraded to pydantic-settings 2.15.0 / starlette 1.6.0 and services restarted
 - **2026-09-03 — Repo sanitized, including full git history rewrite** (`git filter-repo`, 45 commits, force-pushed): replaced all real usernames with `example.edu` placeholders, Mist org/site/wlan/psk UUIDs with fixed test UUIDs, AP/client MACs with locally-administered `02:...` addresses, internal hostnames and firewall FQDNs with `*.example.edu` names, and campus IPs with RFC 5737 documentation ranges (`192.0.2.x` / `198.51.100.x`). Commit author identities that embedded an internal hostname were rewritten via mailmap. Pre-rewrite mirror kept locally (outside the repo) for reference.
-
-### Ops
-- **2026-06-10 — Python upgraded 3.9.21 → 3.12.13** (RHEL 9 app stream): production venv rebuilt at `/opt/mist-userid/venv`, all 104 tests pass, ~50s API downtime during cutover. Old venv kept at `/opt/mist-userid/venv-py39-old` for rollback; remove after a week of clean operation. Note: venvs are not relocatable (console-script shebangs bake in absolute paths) — always build at the final path.
 
 ## [0.3.2] - 2026-05-28
 

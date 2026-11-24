@@ -27,7 +27,7 @@ Two systemd services: an API receiver (returns 202 immediately) and a separate w
 
 ## Versioning
 
-- Semantic versioning, current: **0.3.0**
+- Semantic versioning, current: **0.4.0** (check `app/__init__.py`)
 - Version tracked in `app/__init__.py`
 - Git tags: `v0.1.0`, `v0.2.0`, etc.
 - Open source (MIT License)
@@ -80,6 +80,6 @@ make deploy                              # install systemd units + start
 - **Retry with exponential backoff**: failed PA API batches retry up to 5 times (1s, 2s, 4s, 8s, 16s)
 - **Deduplication**: identical user+IP pairs within 5-min TTL are skipped
 - **Mist webhook signature validation**: HMAC-SHA256 via `X-Mist-Signature-v2` header; reject invalid (401)
-- **Graceful shutdown + watchdog**: worker flushes batch on SIGTERM; calls `sd_notify(WATCHDOG=1)` each loop to prove liveness
+- **Graceful shutdown + watchdog**: worker flushes batch on SIGTERM; a dedicated asyncio task sends `sd_notify(WATCHDOG=1)` every 10s (not the main loop, which can block 31s+ in PA retry backoff)
 - **Credentials via env vars or Vault**: never in code
 - **Sanitize usernames in debug logs**

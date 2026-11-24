@@ -1,5 +1,5 @@
 -r requirements.txt
-pytest>=9.0.0
-pytest-asyncio>=1.4.0
-fakeredis[lua]>=2.36.0
+pytest>=9.2.0
+pytest-asyncio>=1.5.0
+fakeredis[lua]>=2.41.0
 locust>=2.44.0
