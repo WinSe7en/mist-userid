@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+- **403 "User not authorized to perform this operation." is now retried instead of dead-lettered** (2026-11-24). From Sep to Nov it caused about 5× the summer DLQ rate (120 batches, 302 logins lost). It shows up in the same second as the commit-window 403 "not authorized for user role", often on both firewalls at once, and clears by the next batch. Both messages are matched in the reason phrase or the body (`is_transient_403()`). A persistent 403 still dead-letters after the normal retries. The permanent-failure log line now includes the reason phrase and body
+
+### Ops
+- **2026-11-24 — journald made persistent** (`deploy/journald-mist-userid.conf` → `/etc/systemd/journald.conf.d/`): it was RAM-only and held about 8 hours. Now capped at 1G (about 4–5 days), because `/var/log` is a separate 5G volume shared with rsyslog
+- `docs/runbook.md`: added the Periodic Health Review Checklist
+
 ### Added
 - **Daily PA cert expiry check**: `scripts/check_pa_certs.sh` + `mist-userid-certcheck.timer` (08:00 daily) — warns via journald/StellarCyber when a PA cert is within 30 days of expiry; would have prevented the May 2026 incident. Also exposes `mist.userid.cert.days[<host>]` Zabbix UserParameter
 - **`PA_VERIFY_SSL` break-glass option** (default `true`): temporarily disable PA TLS verification during a cert incident so mappings keep flowing while the cert is renewed; worker logs a WARNING at startup while disabled (see runbook)

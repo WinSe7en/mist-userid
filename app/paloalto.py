@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 TRANSIENT_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 DLQ_KEY = "userid_dlq"
 
+# PAN-OS 403 messages seen during commits / admin-role syncs. Both clear within
+# seconds, often hit both firewalls in the same second, and the next batch
+# succeeds — so they are retried, not dead-lettered. The text may be in the
+# body or only in the HTTP reason phrase.
+TRANSIENT_403_MARKERS = (
+    "not authorized for user role",
+    "user not authorized to perform this operation",
+)
+
+
+def is_transient_403(resp: httpx.Response) -> bool:
+    haystack = f"{resp.reason_phrase} {resp.text}".lower()
+    return any(marker in haystack for marker in TRANSIENT_403_MARKERS)
+
 
 def build_uid_xml(
     logins: list[tuple[str, str]],
@@ -135,15 +149,13 @@ async def send_to_target(
                     return False
 
             if resp.status_code == 403:
-                # PAN-OS returns 403 "not authorized for user role" during
-                # auto-commit windows — treat as transient and retry
-                if "not authorized for user role" in resp.text.lower():
+                if is_transient_403(resp):
                     if attempt < max_retries:
                         delay = 2**attempt
                         logger.warning(
-                            "Commit-window 403 from %s, retry %d/%d in %ds: %s",
+                            "Commit-window 403 from %s, retry %d/%d in %ds: %s %s",
                             target, attempt + 1, max_retries, delay,
-                            resp.text[:200],
+                            resp.reason_phrase, resp.text[:200],
                         )
                         PA_REQUESTS.labels(target=target, status="retry").inc()
                         await asyncio.sleep(delay)
@@ -157,7 +169,8 @@ async def send_to_target(
 
                 # Genuine 403 — permanent failure, no retry
                 logger.error(
-                    "Permanent auth failure from %s: %d", target, resp.status_code
+                    "Permanent auth failure from %s: %d %s %s",
+                    target, resp.status_code, resp.reason_phrase, resp.text[:200],
                 )
                 PA_REQUESTS.labels(target=target, status="failure").inc()
                 return False

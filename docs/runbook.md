@@ -72,6 +72,60 @@ curl -s http://localhost/metrics | grep -E "^mist_"
 
 ---
 
+## Periodic Health Review Checklist
+
+Run monthly (and after any reboot, PAN-OS upgrade, or cert change). Each item says what "healthy" looks like and what to do if it isn't.
+
+> **Log retention caveat:** journald is persistent (since 2026-11-24, `deploy/journald-mist-userid.conf`) but capped at 1G, about 4–5 days at current volume. Before that it was RAM-only and held about 8 hours. For anything older, search `/var/log/messages*` (rotated weekly, ~4 weeks kept) instead of `journalctl`.
+
+```bash
+# Helper: all worker log history rsyslog still has
+LOGS="$(ls /var/log/messages* | tr '\n' ' ')"
+```
+
+### A. Is it running?
+
+| # | Check | Command | Healthy |
+|---|-------|---------|---------|
+| A1 | Both services active, no restarts | `systemctl show mist-userid-api mist-userid-worker -p ActiveState,NRestarts,ActiveEnterTimestamp` | `active`, `NRestarts=0`, start time = last reboot |
+| A2 | No watchdog kills | `sudo grep -hciE "watchdog\|SIGABRT" $LOGS` | `0` |
+| A3 | Readiness | `curl -s localhost:8000/ready` | `"ready"`, both targets `reachable`, `api_key: valid` |
+| A4 | Last reboot / kernel | `last reboot \| head -3` | Expected patch-window reboot; services came back on their own |
+
+### B. Is it keeping up?
+
+| # | Check | Command | Healthy |
+|---|-------|---------|---------|
+| B1 | Queue depth | `redis-cli LLEN userid_queue` | `0` (brief spikes <100 fine) |
+| B2 | Webhook volume (24h) | `sudo journalctl -u mist-userid-api --since "24 hours ago" -q \| grep -c "POST /mist/webhook"` | ~190–200K/day (Nov 2026 baseline); big drop = Mist webhook problem (procedure 4) |
+| B3 | Stale / rejected events | `sudo grep -hc "stale event" $LOGS`; `sudo grep -hci "queue full\|signature validation failed" $LOGS` | All `0` |
+| B4 | Memory vs limits | `systemctl show mist-userid-api mist-userid-worker -p MemoryCurrent,MemoryPeak` | API ~230–250MB (limit 512M), worker ~75–90MB (limit 256M); flat over time = no leak |
+
+### C. Is it delivering to the firewalls?
+
+| # | Check | Command | Healthy |
+|---|-------|---------|---------|
+| C1 | DLQ depth **and rate** | `redis-cli LLEN userid_dlq` + per-day breakdown (DLQ section above) | Rate ≤ ~0.3/day (summer 2026 baseline). Compare rate, not just depth |
+| C2 | DLQ cause | `sudo grep -h "Permanent auth\|Max retries\|Connection error\|Commit-window" $LOGS \| sed -E 's/.*app\.paloalto: //; s/[0-9]+/N/g' \| sort \| uniq -c \| sort -rn` | Few lines; note which cause dominates (403 vs timeout) and which firewall |
+| C3 | Firewall split | DLQ `targets` field | Single-firewall failures point at that box/its path; simultaneous failures point at a shared cause (commit, network) |
+
+### D. Will it keep working?
+
+| # | Check | Command | Healthy |
+|---|-------|---------|---------|
+| D1 | PA cert expiry | `sudo /opt/mist-userid/scripts/check_pa_certs.sh 30` | `OK` on both, >30 days. **Renew ~30 days before expiry**; timer warnings only land in logs |
+| D2 | Cert-check timer ran | `systemctl list-timers mist-userid-certcheck.timer` | LAST within 24h |
+| D3 | Time sync | `timedatectl \| grep synchronized` | `yes` (stale-event detection depends on it) |
+| D4 | Disk | `df -h / /var /var/log` | <80%. **`/var/log` is a separate 5G volume** and the tightest: rsyslog `messages*` (~650MB/week × ~5) + journald (≤1G) |
+| D5 | Dependency CVEs | `python3.12 -m pip_audit -r requirements.txt` (dev box) | No findings; else upgrade prod venv + restart |
+| D6 | CI | `gh run list --repo WinSe7en/mist-userid --limit 1` | `success` |
+
+### E. Housekeeping after the review
+- Record findings in the Known Issues table below if anything new turned up
+- Archive then clear the DLQ for a fresh baseline: `redis-cli --no-raw LRANGE userid_dlq 0 -1 > ~/dlq-archive-$(date +%F).txt && redis-cli DEL userid_dlq`
+
+---
+
 ## Runbook Procedures
 
 ---
@@ -348,3 +402,5 @@ echo | openssl s_client -connect pa-fw-02.mgmt.example.edu:443 2>/dev/null | ope
 | Mar 6, 2026 | NTP inactive | Enabled chronyd, pointed to ntp.example.edu |
 | Mar 6, 2026 | userid_timeout too short (60 min) | Increased to 360 min |
 | May 21–28, 2026 | pan03 SSL cert expired; daily DLQ failures, worker watchdog crash | Both pan03 + pan04 certs renewed (valid through Dec 12, 2026); worker restarted; DLQ cleared |
+| Sep 3 – Nov 24, 2026 | DLQ rate rose ~5× (120 batches, 302 logins lost) from 403 "User not authorized to perform this operation." on both firewalls, dead-lettered as permanent | Classified as transient (retried like commit-window 403) on Nov 24 |
+| Nov 24, 2026 | journald RAM-only, held ~8 hrs; monthly reviews couldn't see history | Made persistent, capped 1G (`deploy/journald-mist-userid.conf`) |

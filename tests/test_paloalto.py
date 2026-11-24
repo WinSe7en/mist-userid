@@ -152,6 +152,51 @@ class TestSendToTarget:
         assert client.post.call_count == 3  # initial + 2 retries
 
     @pytest.mark.asyncio
+    async def test_403_operation_not_authorized_reason_phrase_retries(self):
+        """PAN-OS 'User not authorized to perform this operation.' 403 is transient.
+
+        Observed Sep-Nov 2026 in the same second as commit-window 403s, often on
+        both firewalls at once, with the next batch succeeding. The text arrives
+        in the HTTP reason phrase, not necessarily the body.
+        """
+        op_403 = httpx.Response(
+            403,
+            text="",
+            extensions={"reason_phrase": b"User not authorized to perform this operation."},
+        )
+        success_resp = httpx.Response(
+            200, text='<response status="success"><result/></response>'
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(side_effect=[op_403, success_resp])
+
+        with patch("app.paloalto.asyncio.sleep", new_callable=AsyncMock):
+            result = await send_to_target(
+                client, "https://pa.example.com", "<xml/>", "key", max_retries=3
+            )
+        assert result is True
+        assert client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_403_operation_not_authorized_body_retries(self):
+        """Same transient 403, with the message in the response body."""
+        op_403 = httpx.Response(
+            403,
+            text='<response status="error"><msg>'
+                 '<line>User not authorized to perform this operation.</line>'
+                 '</msg></response>',
+        )
+        client = AsyncMock(spec=httpx.AsyncClient)
+        client.post = AsyncMock(return_value=op_403)
+
+        with patch("app.paloalto.asyncio.sleep", new_callable=AsyncMock):
+            result = await send_to_target(
+                client, "https://pa.example.com", "<xml/>", "key", max_retries=2
+            )
+        assert result is False
+        assert client.post.call_count == 3  # retried, then gave up
+
+    @pytest.mark.asyncio
     async def test_transient_failure_retries(self):
         responses = [
             httpx.Response(503, text="Service Unavailable"),
