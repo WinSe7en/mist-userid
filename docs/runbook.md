@@ -91,6 +91,7 @@ LOGS="$(ls /var/log/messages* | tr '\n' ' ')"
 | A2 | No watchdog kills | `sudo grep -hciE "watchdog\|SIGABRT" $LOGS` | `0` |
 | A3 | Readiness | `curl -s localhost:8000/ready` | `"ready"`, both targets `reachable`, `api_key` = `keygen` or `static` (auth mode only; `/ready` never generates keys, so key health shows in the worker log: "API key validated" at startup, no "Permanent auth failure") |
 | A4 | Last reboot / kernel | `last reboot \| head -3` | Expected patch-window reboot; services came back on their own |
+| A5 | Redis running | `systemctl show redis -p ActiveState,NRestarts,UnitFileState`; `redis-cli ping` | `active`, `NRestarts=0`, `enabled`, `PONG`. If down, the API returns errors to Mist and the worker backs off every 5s (procedure 6) |
 
 ### B. Is it keeping up?
 
@@ -119,6 +120,8 @@ LOGS="$(ls /var/log/messages* | tr '\n' ' ')"
 | D4 | Disk | `df -h / /var /var/log` | <80%. **`/var/log` is a separate 5G volume** and the tightest: rsyslog `messages*` (~650MB/week × ~5) + journald (≤1G) |
 | D5 | Dependency CVEs | `python3.12 -m pip_audit -r requirements.txt` (dev box) | No findings; else upgrade prod venv + restart |
 | D6 | CI | `gh run list --repo WinSe7en/mist-userid --limit 1` | `success` |
+| D7 | Redis persistence | `redis-cli info persistence \| grep -E "rdb_last_bgsave_status\|rdb_last_save_time"` (convert with `date -d @<time>`) | `ok`, last save within the last hour. A failing save means the queue/DLQ won't survive a restart; usually a full or unwritable `/var/lib/redis` |
+| D8 | Redis memory & exposure | `redis-cli info memory \| grep used_memory_human`; `redis-cli config get bind` | A few MB (Nov 2026: ~1MB). Bound to `127.0.0.1 -::1` only. It has no password, which is safe only while it stays localhost-bound; add auth before any move to a shared Redis |
 
 ### E. Housekeeping after the review
 - Record findings in the Known Issues table below if anything new turned up
